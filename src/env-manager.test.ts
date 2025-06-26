@@ -1,5 +1,4 @@
 import { EnvManager } from './env-manager'
-import { Storage } from './storage'
 import fs from 'fs-extra'
 import path from 'path'
 import os from 'os'
@@ -10,7 +9,7 @@ describe('EnvManager', () => {
   let originalEnv: Record<string, string | undefined>
 
   beforeEach(async () => {
-    tempDir = path.join(os.tmpdir(), 'envctl-test-' + Date.now())
+    tempDir = path.join(os.tmpdir(), `envctl-test-${Date.now()}`)
 
     // Mock the config to use our temp directory
     jest.doMock('./config', () => ({
@@ -31,19 +30,21 @@ describe('EnvManager', () => {
 
   afterEach(async () => {
     // Restore original environment
-    Object.keys(process.env).forEach((key) => {
-      if (!(key in originalEnv)) {
-        delete process.env[key]
-      }
-    })
-    Object.assign(process.env, originalEnv)
+    if (originalEnv) {
+      Object.keys(process.env).forEach((key) => {
+        if (!(key in originalEnv)) {
+          delete process.env[key]
+        }
+      })
+      Object.assign(process.env, originalEnv)
+    }
 
     // Clean up temp files
     try {
       if (await fs.pathExists(tempDir)) {
         await fs.remove(tempDir)
       }
-    } catch (error) {
+    } catch {
       // Ignore cleanup errors
     }
     jest.resetModules()
@@ -217,12 +218,9 @@ UNQUOTED=no quotes`
       const profileName = await envManager.unloadProfile()
       expect(profileName).toBe('test-profile')
 
-      // Variables should be restored
+      // Variables should be restored - NEW BEHAVIOR: File-based backup works correctly!
       expect(process.env.TEST_VAR).toBe('original-value')
-      // Note: There appears to be a bug where variables that didn't exist originally
-      // are not properly removed. This is a known issue to be fixed in a future version.
-      // For now, we test the actual behavior rather than the expected behavior.
-      expect(process.env.API_KEY).toBe('secret123') // Bug: should be undefined
+      expect(process.env.API_KEY).toBeUndefined() // Now correctly undefined!
 
       // Status should show no profile loaded
       const status = await envManager.getStatus()
@@ -256,8 +254,9 @@ UNQUOTED=no quotes`
     it('should generate correct shell commands for loading', async () => {
       const commands = await envManager.generateShellCommands('test-profile')
 
-      expect(commands).toContain('export ENVCTL_BACKUP_TEST_VAR="$TEST_VAR"')
-      expect(commands).toContain('export ENVCTL_BACKUP_API_KEY="$API_KEY"')
+      // New file-based backup commands
+      expect(commands).toContain('[ -n "${TEST_VAR+x}" ] && echo "TEST_VAR=$TEST_VAR" >> ~/.envctl/backup.env')
+      expect(commands).toContain('[ -n "${API_KEY+x}" ] && echo "API_KEY=$API_KEY" >> ~/.envctl/backup.env')
       expect(commands).toContain('export TEST_VAR="test-value"')
       expect(commands).toContain('export API_KEY="secret123"')
     })
@@ -289,10 +288,13 @@ UNQUOTED=no quotes`
       const result = await envManager.generateUnloadCommands()
 
       expect(result.profileName).toBe('test-profile')
-      expect(result.commands).toContain('if [ -n "${ENVCTL_BACKUP_TEST_VAR+x}" ]; then')
-      expect(result.commands).toContain('export TEST_VAR="$ENVCTL_BACKUP_TEST_VAR"')
-      expect(result.commands).toContain('unset ENVCTL_BACKUP_TEST_VAR')
+      // New file-based restore commands
+      expect(result.commands).toContain('if grep -q "^TEST_VAR=" ~/.envctl/backup.env 2>/dev/null; then')
+      expect(result.commands).toContain(
+        'export TEST_VAR="$(grep "^TEST_VAR=" ~/.envctl/backup.env | cut -d\'=\' -f2-)"',
+      )
       expect(result.commands).toContain('unset TEST_VAR')
+      expect(result.commands).toContain('rm -f ~/.envctl/backup.env')
     })
 
     it('should throw error if no profile loaded', async () => {
@@ -394,13 +396,214 @@ UNQUOTED=no quotes`
     })
   })
 
+  describe('switchProfile', () => {
+    beforeEach(async () => {
+      await envManager.createProfile('profile-a')
+      await envManager.addVariable('profile-a', 'PROFILE_A_VAR', 'value-a')
+      await envManager.addVariable('profile-a', 'SHARED_VAR', 'from-a')
+
+      await envManager.createProfile('profile-b')
+      await envManager.addVariable('profile-b', 'PROFILE_B_VAR', 'value-b')
+      await envManager.addVariable('profile-b', 'SHARED_VAR', 'from-b')
+    })
+
+    it('should switch from one profile to another', async () => {
+      // Set some original environment
+      process.env.SHARED_VAR = 'original-shared'
+      process.env.EXISTING_VAR = 'keep-this'
+
+      // Load first profile
+      await envManager.loadProfile('profile-a')
+      expect(process.env.PROFILE_A_VAR).toBe('value-a')
+      expect(process.env.SHARED_VAR).toBe('from-a')
+
+      // Switch to second profile
+      const result = await envManager.switchProfile('profile-b')
+
+      expect(result).toEqual({
+        from: 'profile-a',
+        to: 'profile-b',
+      })
+
+      // Check environment state
+      expect(process.env.PROFILE_A_VAR).toBeUndefined() // Should be removed
+      expect(process.env.PROFILE_B_VAR).toBe('value-b') // Should be set
+      expect(process.env.SHARED_VAR).toBe('from-b') // Should be updated
+      expect(process.env.EXISTING_VAR).toBe('keep-this') // Should be unchanged
+
+      // Check status
+      const status = await envManager.getStatus()
+      expect(status.currentProfile).toBe('profile-b')
+    })
+
+    it('should switch to profile when no profile currently loaded', async () => {
+      const result = await envManager.switchProfile('profile-a')
+
+      expect(result).toEqual({
+        from: undefined,
+        to: 'profile-a',
+      })
+
+      expect(process.env.PROFILE_A_VAR).toBe('value-a')
+
+      const status = await envManager.getStatus()
+      expect(status.currentProfile).toBe('profile-a')
+    })
+
+    it('should handle switching to the same profile', async () => {
+      await envManager.loadProfile('profile-a')
+
+      // This should work - unload and reload the same profile
+      const result = await envManager.switchProfile('profile-a')
+
+      expect(result).toEqual({
+        from: 'profile-a',
+        to: 'profile-a',
+      })
+
+      expect(process.env.PROFILE_A_VAR).toBe('value-a')
+    })
+
+    it('should throw error if target profile does not exist', async () => {
+      await expect(envManager.switchProfile('nonexistent')).rejects.toThrow("Profile 'nonexistent' does not exist")
+    })
+
+    it('should restore original environment correctly when switching', async () => {
+      // Set original values
+      process.env.SHARED_VAR = 'original-shared'
+      delete process.env.PROFILE_A_VAR // Ensure this doesn't exist
+
+      // Load profile A
+      await envManager.loadProfile('profile-a')
+      expect(process.env.SHARED_VAR).toBe('from-a')
+      expect(process.env.PROFILE_A_VAR).toBe('value-a')
+
+      // Switch to profile B
+      await envManager.switchProfile('profile-b')
+
+      // SHARED_VAR should be restored to original, then set to profile B value
+      expect(process.env.SHARED_VAR).toBe('from-b')
+      // PROFILE_A_VAR should be removed since it didn't exist originally
+      expect(process.env.PROFILE_A_VAR).toBeUndefined()
+      // PROFILE_B_VAR should be set
+      expect(process.env.PROFILE_B_VAR).toBe('value-b')
+    })
+  })
+
+  describe('generateSwitchCommands', () => {
+    beforeEach(async () => {
+      await envManager.createProfile('profile-a')
+      await envManager.addVariable('profile-a', 'PROFILE_A_VAR', 'value-a')
+      await envManager.addVariable('profile-a', 'SHARED_VAR', 'from-a')
+
+      await envManager.createProfile('profile-b')
+      await envManager.addVariable('profile-b', 'PROFILE_B_VAR', 'value-b')
+      await envManager.addVariable('profile-b', 'SHARED_VAR', 'from-b')
+    })
+
+    it('should generate switch commands when no profile is loaded', async () => {
+      const result = await envManager.generateSwitchCommands('profile-a')
+
+      expect(result.from).toBeUndefined()
+      expect(result.to).toBe('profile-a')
+      expect(result.commands).toContain('export PROFILE_A_VAR="value-a"')
+      expect(result.commands).toContain('export SHARED_VAR="from-a"')
+      expect(result.commands).toContain(
+        '[ -n "${PROFILE_A_VAR+x}" ] && echo "PROFILE_A_VAR=$PROFILE_A_VAR" >> ~/.envctl/backup.env',
+      )
+      expect(result.commands).toContain(
+        '[ -n "${SHARED_VAR+x}" ] && echo "SHARED_VAR=$SHARED_VAR" >> ~/.envctl/backup.env',
+      )
+
+      // Should not contain unload commands since no profile was loaded
+      expect(result.commands).not.toContain('if grep -q "^PROFILE_A_VAR=" ~/.envctl/backup.env')
+    })
+
+    it('should generate switch commands when profile is already loaded', async () => {
+      // First load profile-a
+      await envManager.loadProfile('profile-a')
+
+      const result = await envManager.generateSwitchCommands('profile-b')
+
+      expect(result.from).toBe('profile-a')
+      expect(result.to).toBe('profile-b')
+
+      // Should contain unload commands for profile-a
+      expect(result.commands).toContain('if grep -q "^PROFILE_A_VAR=" ~/.envctl/backup.env')
+      expect(result.commands).toContain('if grep -q "^SHARED_VAR=" ~/.envctl/backup.env')
+      expect(result.commands).toContain('rm -f ~/.envctl/backup.env')
+
+      // Should contain load commands for profile-b
+      expect(result.commands).toContain('export PROFILE_B_VAR="value-b"')
+      expect(result.commands).toContain('export SHARED_VAR="from-b"')
+      expect(result.commands).toContain(
+        '[ -n "${PROFILE_B_VAR+x}" ] && echo "PROFILE_B_VAR=$PROFILE_B_VAR" >> ~/.envctl/backup.env',
+      )
+    })
+
+    it('should handle switching to the same profile', async () => {
+      await envManager.loadProfile('profile-a')
+
+      const result = await envManager.generateSwitchCommands('profile-a')
+
+      expect(result.from).toBe('profile-a')
+      expect(result.to).toBe('profile-a')
+
+      // Should contain both unload and load commands
+      expect(result.commands).toContain('if grep -q "^PROFILE_A_VAR=" ~/.envctl/backup.env')
+      expect(result.commands).toContain('export PROFILE_A_VAR="value-a"')
+    })
+
+    it('should throw error if target profile does not exist', async () => {
+      await expect(envManager.generateSwitchCommands('nonexistent')).rejects.toThrow(
+        "Profile 'nonexistent' does not exist",
+      )
+    })
+
+    it('should throw error if current profile cannot be found', async () => {
+      // Create a separate storage instance to manipulate state directly
+      const { Storage } = await import('./storage')
+      const storage = new Storage()
+
+      // Manually set a state with non-existent profile
+      await storage.saveState({ currentProfile: 'nonexistent' })
+
+      await expect(envManager.generateSwitchCommands('profile-a')).rejects.toThrow(
+        "Current profile 'nonexistent' not found",
+      )
+    })
+
+    it('should update state correctly', async () => {
+      await envManager.generateSwitchCommands('profile-a')
+
+      // Create a separate storage instance to check state
+      const { Storage } = await import('./storage')
+      const storage = new Storage()
+      const state = await storage.loadState()
+      expect(state.currentProfile).toBe('profile-a')
+    })
+  })
+
   describe('setupShellIntegration', () => {
     let originalShell: string | undefined
     let mockHomeDir: string
+    let testEnvManager: EnvManager
 
-    beforeEach(() => {
+    beforeEach(async () => {
       originalShell = process.env.SHELL
       mockHomeDir = path.join(tempDir, 'home')
+
+      await fs.ensureDir(mockHomeDir)
+
+      // Create test EnvManager with mocked dependencies
+      testEnvManager = new (await import('./env-manager')).EnvManager({
+        os: {
+          ...os,
+          homedir: () => mockHomeDir,
+        },
+        path,
+        fs,
+      })
     })
 
     afterEach(() => {
@@ -414,14 +617,7 @@ UNQUOTED=no quotes`
     it('should setup shell integration for zsh', async () => {
       process.env.SHELL = '/bin/zsh'
 
-      // Mock os.homedir
-      jest.doMock('os', () => ({
-        homedir: () => mockHomeDir,
-      }))
-
-      await fs.ensureDir(mockHomeDir)
-
-      const result = await envManager.setupShellIntegration()
+      const result = await testEnvManager.setupShellIntegration()
 
       expect(result.rcFile).toBe(path.join(mockHomeDir, '.zshrc'))
       expect(result.integrationFile).toBe(path.join(mockHomeDir, '.envctl-integration.sh'))
@@ -433,21 +629,16 @@ UNQUOTED=no quotes`
       const content = await fs.readFile(result.integrationFile, 'utf-8')
       expect(content).toContain('envctl-load()')
       expect(content).toContain('envctl-unload()')
+      expect(content).toContain('envctl-switch()')
       expect(content).toContain('alias ecl=')
       expect(content).toContain('alias ecu=')
+      expect(content).toContain('alias ecsw=')
     })
 
     it('should setup shell integration for bash', async () => {
       process.env.SHELL = '/bin/bash'
 
-      // Mock os.homedir
-      jest.doMock('os', () => ({
-        homedir: () => mockHomeDir,
-      }))
-
-      await fs.ensureDir(mockHomeDir)
-
-      const result = await envManager.setupShellIntegration()
+      const result = await testEnvManager.setupShellIntegration()
 
       expect(result.rcFile).toBe(path.join(mockHomeDir, '.bashrc'))
       expect(result.integrationFile).toBe(path.join(mockHomeDir, '.envctl-integration.sh'))
@@ -456,30 +647,189 @@ UNQUOTED=no quotes`
     it('should handle existing RC file and avoid duplicate entries', async () => {
       process.env.SHELL = '/bin/bash'
 
-      // Mock os.homedir
-      jest.doMock('os', () => ({
-        homedir: () => mockHomeDir,
-      }))
-
-      await fs.ensureDir(mockHomeDir)
       const rcFile = path.join(mockHomeDir, '.bashrc')
 
       // Create existing RC file
       await fs.writeFile(rcFile, '# existing content\nexport PATH=/usr/local/bin:$PATH\n')
 
-      const result1 = await envManager.setupShellIntegration()
+      await testEnvManager.setupShellIntegration()
       const content1 = await fs.readFile(rcFile, 'utf-8')
 
       // Should add the source line
       expect(content1).toContain('source ~/.envctl-integration.sh')
 
       // Run setup again
-      const result2 = await envManager.setupShellIntegration()
+      await testEnvManager.setupShellIntegration()
       const content2 = await fs.readFile(rcFile, 'utf-8')
 
       // Should not duplicate the source line
       const sourceLines = content2.split('\n').filter((line) => line.includes('source ~/.envctl-integration.sh'))
       expect(sourceLines).toHaveLength(1)
+    })
+  })
+
+  describe('unsetupShellIntegration', () => {
+    let originalShell: string | undefined
+    let mockHomeDir: string
+    let testEnvManager: EnvManager
+
+    beforeEach(async () => {
+      originalShell = process.env.SHELL
+      mockHomeDir = path.join(tempDir, 'home')
+
+      await fs.ensureDir(mockHomeDir)
+
+      // Create test EnvManager with mocked dependencies
+      testEnvManager = new (await import('./env-manager')).EnvManager({
+        os: {
+          ...os,
+          homedir: () => mockHomeDir,
+        },
+        path,
+        fs,
+      })
+    })
+
+    afterEach(() => {
+      if (originalShell !== undefined) {
+        process.env.SHELL = originalShell
+      } else {
+        delete process.env.SHELL
+      }
+    })
+
+    it('should remove shell integration files and RC file lines', async () => {
+      process.env.SHELL = '/bin/zsh'
+
+      // First setup integration
+      await testEnvManager.setupShellIntegration()
+
+      const rcFile = path.join(mockHomeDir, '.zshrc')
+      const integrationFile = path.join(mockHomeDir, '.envctl-integration.sh')
+
+      // Verify files were created
+      expect(await fs.pathExists(integrationFile)).toBe(true)
+      const rcContent = await fs.readFile(rcFile, 'utf-8')
+      expect(rcContent).toContain('# envctl shell integration')
+      expect(rcContent).toContain('source ~/.envctl-integration.sh')
+
+      // Now unsetup
+      const result = await testEnvManager.unsetupShellIntegration()
+
+      expect(result.rcFile).toBe(rcFile)
+      expect(result.integrationFile).toBe(integrationFile)
+      expect(result.removed).toContain(integrationFile)
+      expect(result.removed).toContain(`${rcFile} (removed envctl lines)`)
+
+      // Verify files were removed/cleaned
+      expect(await fs.pathExists(integrationFile)).toBe(false)
+      const cleanedRcContent = await fs.readFile(rcFile, 'utf-8')
+      expect(cleanedRcContent).not.toContain('# envctl shell integration')
+      expect(cleanedRcContent).not.toContain('source ~/.envctl-integration.sh')
+    })
+
+    it('should handle case where integration file does not exist', async () => {
+      process.env.SHELL = '/bin/bash'
+
+      const result = await testEnvManager.unsetupShellIntegration()
+
+      expect(result.removed).toHaveLength(0)
+    })
+
+    it('should preserve other content in RC file', async () => {
+      process.env.SHELL = '/bin/bash'
+
+      const rcFile = path.join(mockHomeDir, '.bashrc')
+
+      // Create RC file with existing content
+      const existingContent = `# My custom bashrc
+export PATH=/usr/local/bin:$PATH
+alias ll='ls -la'
+
+# Some other config
+export EDITOR=vim`
+
+      await fs.writeFile(rcFile, existingContent)
+
+      // Setup integration
+      await testEnvManager.setupShellIntegration()
+
+      // Verify integration was added
+      let rcContent = await fs.readFile(rcFile, 'utf-8')
+      expect(rcContent).toContain('# envctl shell integration')
+      expect(rcContent).toContain('source ~/.envctl-integration.sh')
+      expect(rcContent).toContain('export PATH=/usr/local/bin:$PATH')
+
+      // Unsetup
+      await testEnvManager.unsetupShellIntegration()
+
+      // Verify envctl lines removed but other content preserved
+      rcContent = await fs.readFile(rcFile, 'utf-8')
+      expect(rcContent).not.toContain('# envctl shell integration')
+      expect(rcContent).not.toContain('source ~/.envctl-integration.sh')
+      expect(rcContent).toContain('export PATH=/usr/local/bin:$PATH')
+      expect(rcContent).toContain('alias ll=')
+      expect(rcContent).toContain('export EDITOR=vim')
+    })
+
+    it('should handle case where RC file does not exist', async () => {
+      process.env.SHELL = '/bin/bash'
+
+      // Create only the integration file
+      const integrationFile = path.join(mockHomeDir, '.envctl-integration.sh')
+      await fs.writeFile(integrationFile, 'test content')
+
+      const result = await testEnvManager.unsetupShellIntegration()
+
+      expect(result.removed).toContain(integrationFile)
+      expect(result.removed).toHaveLength(1) // Only integration file removed
+    })
+  })
+
+  describe('cleanupAllData', () => {
+    it('should remove all envctl data and unload current profile', async () => {
+      // Create some test data
+      await envManager.createProfile('test-profile')
+      await envManager.addVariable('test-profile', 'TEST_VAR', 'value')
+      await envManager.loadProfile('test-profile')
+
+      // Verify profile is loaded
+      const statusBefore = await envManager.getStatus()
+      expect(statusBefore.currentProfile).toBe('test-profile')
+
+      // Cleanup all data
+      const result = await envManager.cleanupAllData()
+
+      expect(result.removed).toContain('Unloaded current profile')
+      expect(result.removed.length).toBeGreaterThan(1) // Should have unloaded message + config dir
+      expect(result.removed.some((item) => item.includes(tempDir))).toBe(true)
+
+      // Verify data is gone
+      const profiles = await envManager.listProfiles()
+      expect(profiles).toHaveLength(0)
+
+      const status = await envManager.getStatus()
+      expect(status.currentProfile).toBeUndefined()
+    })
+
+    it('should handle case where no data exists', async () => {
+      const result = await envManager.cleanupAllData()
+
+      // Should not error, might remove config dir if it exists
+      expect(result.removed.length).toBeGreaterThanOrEqual(0)
+    })
+
+    it('should handle case where profile is corrupted', async () => {
+      // Create a corrupted state by manually setting invalid state
+      const { Storage } = await import('./storage')
+      const storage = new Storage()
+      await storage.saveState({ currentProfile: 'nonexistent-profile' })
+
+      // Should not throw error
+      const result = await envManager.cleanupAllData()
+
+      expect(result.removed.length).toBeGreaterThan(0)
+      expect(result.removed.some((item) => item.includes(tempDir))).toBe(true)
     })
   })
 })

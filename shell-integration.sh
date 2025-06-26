@@ -36,8 +36,28 @@ envctl-unload() {
     fi
 }
 
+# Function to switch profiles
+envctl-switch() {
+    if [ -z "$1" ]; then
+        echo "Usage: envctl-switch <profile>"
+        return 1
+    fi
+    
+    local commands
+    commands=$(envctl switch --shell "$1" 2>/dev/null)
+    if [ $? -eq 0 ]; then
+        eval "$commands"
+        echo "✓ Switched to profile '$1'"
+    else
+        echo "✗ Failed to switch to profile '$1'"
+        envctl switch --shell "$1"  # Show the error
+        return 1
+    fi
+}
+
 # Aliases for convenience
 alias ecl='envctl-load'
 alias ecu='envctl-unload'
+alias ecsw='envctl-switch'
 alias ecs='envctl status'
 alias ecls='envctl list' 

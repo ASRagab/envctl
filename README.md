@@ -14,11 +14,13 @@ A environment variable context manager for development workflows. Easily create,
 ## Installation
 
 ### From npm
+
 ```bash
 npm install -g envctl
 ```
 
 ### Quick Setup (Recommended)
+
 After installing, run the setup command to install shell integration:
 
 ```bash
@@ -26,29 +28,37 @@ envctl setup
 ```
 
 This will:
-- Install shell functions (`envctl-load`, `envctl-unload`) to your shell
-- Add convenient aliases (`ecl`, `ecu`, `ecs`, `ecls`)
+
+- Install shell functions (`envctl-load`, `envctl-unload`, `envctl-switch`) to your shell
+- Add convenient aliases (`ecl`, `ecu`, `ecsw`, `ecs`, `ecls`)
 - Automatically detect your shell (.bashrc, .zshrc, etc.)
 - Set up everything needed for seamless environment variable management
 
 Then restart your shell or run:
+
 ```bash
 source ~/.bashrc  # or ~/.zshrc for zsh users
 ```
 
 ### Manual Shell Integration (Alternative)
+
 If you prefer manual setup or the automatic setup doesn't work:
 
 **Option 1: Use eval (Quick method)**
+
 ```bash
 # Load a profile
 eval "$(envctl load --shell dev)"
 
-# Unload a profile  
+# Switch to a different profile
+eval "$(envctl switch --shell staging)"
+
+# Unload a profile
 eval "$(envctl unload --shell)"
 ```
 
 **Option 2: Manual shell functions installation**
+
 ```bash
 # Download the shell integration script
 curl -o ~/.envctl-integration.sh https://raw.githubusercontent.com/yourusername/envctl/main/shell-integration.sh
@@ -59,6 +69,7 @@ source ~/.bashrc
 ```
 
 ### Local Development
+
 ```bash
 # Clone or create the project
 git clone <your-repo>
@@ -115,6 +126,10 @@ envctl list
 # List variables in a profile
 envctl list dev
 
+# Switch to a different profile (unload current + load new)
+envctl-switch production
+# or: ecsw production
+
 # Unload the profile (restores previous environment)
 envctl-unload
 # or: ecu
@@ -126,6 +141,7 @@ envctl export dev > dev.env
 ## Commands
 
 ### `envctl create <profile>`
+
 Create a new environment profile.
 
 ```bash
@@ -135,6 +151,7 @@ envctl create dev
 ```
 
 ### `envctl add <profile> <KEY=VALUE>`
+
 Add or update an environment variable in a profile.
 
 ```bash
@@ -143,6 +160,7 @@ envctl add dev API_PORT=3000
 ```
 
 ### `envctl add <profile> -f <file>`
+
 Import environment variables from a file.
 
 ```bash
@@ -151,6 +169,7 @@ envctl add production -f production.env
 ```
 
 **File format:**
+
 ```env
 # Comments are supported
 DATABASE_URL=postgresql://localhost/mydb
@@ -162,6 +181,7 @@ DEBUG=true
 ```
 
 ### `envctl remove <profile> <key>`
+
 Remove an environment variable from a profile.
 
 ```bash
@@ -169,7 +189,9 @@ envctl remove dev API_KEY
 ```
 
 ### `envctl load <profile>`
+
 Load a profile into the current shell session. This will:
+
 - Backup current values of variables that will be overwritten
 - Set all variables from the profile
 - Mark the profile as currently loaded
@@ -179,13 +201,27 @@ envctl load dev
 ```
 
 ### `envctl unload`
+
 Unload the currently loaded profile and restore the previous environment.
 
 ```bash
 envctl unload
 ```
 
+### `envctl switch <profile>`
+
+Switch to a different profile in one command. This will unload the current profile (if any) and load the new one.
+
+```bash
+# Switch from current profile to staging
+envctl switch staging
+
+# Load a profile when none is currently loaded
+envctl switch dev
+```
+
 ### `envctl status`
+
 Show which profile is currently loaded and how many variables it contains.
 
 ```bash
@@ -194,6 +230,7 @@ envctl status
 ```
 
 ### `envctl list [profile]`
+
 List all profiles or show variables in a specific profile.
 
 ```bash
@@ -205,6 +242,7 @@ envctl list dev
 ```
 
 ### `envctl export <profile>`
+
 Export a profile in environment file format.
 
 ```bash
@@ -216,51 +254,87 @@ envctl export dev > backup.env
 ```
 
 ### `envctl delete <profile>`
+
 Delete a profile. Cannot delete a currently loaded profile.
 
 ```bash
 envctl delete old-profile
 ```
 
+### `envctl setup`
+
+Install shell integration functions for seamless environment variable management.
+
+```bash
+envctl setup
+```
+
+This installs shell functions (`envctl-load`, `envctl-unload`, `envctl-switch`) and convenient aliases (`ecl`, `ecu`, `ecsw`, `ecs`, `ecls`) to your shell.
+
+### `envctl unsetup [--all]`
+
+Remove shell integration and optionally all envctl data.
+
+```bash
+# Remove only shell integration (keeps profiles and data)
+envctl unsetup
+
+# Remove everything including all profiles and data (WARNING: destructive)
+envctl unsetup --all
+```
+
+**What `envctl unsetup` removes:**
+
+- `~/.envctl-integration.sh` file
+- Shell integration lines from your RC file (`.bashrc`, `.zshrc`, etc.)
+
+**What `envctl unsetup --all` removes:**
+
+- Everything from basic unsetup
+- All profiles and environment variables
+- Configuration directory (`~/.envctl/`)
+- State and backup files
+
+⚠️ **Warning:** The `--all` flag is destructive and cannot be undone. Use with caution.
+
 ## How It Works
 
 ### Environment Management
-- **Loading**: When you load a profile, envctl backs up the current values of any environment variables that will be overwritten, then sets the new values.
-- **Unloading**: When you unload, it restores the original values (or unsets variables that weren't previously set).
+
+- **Loading**: When you load a profile, envctl backs up the current values of any environment variables that will be overwritten to `~/.envctl/backup.env`, then sets the new values.
+- **Unloading**: When you unload, it restores the original values from the backup file (or unsets variables that weren't previously set).
 - **State Tracking**: The tool keeps track of what's currently loaded in `~/.envctl/state.json`.
+- **Smart Backup**: Only variables that actually exist are backed up, ensuring clean environment restoration.
 
 ### File Storage
+
 - Profiles are stored in `~/.envctl/profiles/` as JSON files
 - Each profile contains metadata (creation/update times) and the environment variables
 - State information is stored in `~/.envctl/state.json`
+- Environment backup is stored in `~/.envctl/backup.env` (only when a profile is loaded)
 
 ### Cross-Platform
+
 Works on Windows, macOS, and Linux. Uses the user's home directory for storing configuration.
 
 ## Use Cases
 
 ### Development Environments
+
 ```bash
 # Create different environments for your project
 envctl create local
-envctl create staging  
+envctl create staging
 envctl create production
 
 # Set up local development
 envctl add local DATABASE_URL=postgresql://localhost/mydb
 envctl add local REDIS_URL=redis://localhost:6379
 envctl add local NODE_ENV=development
-
-# Quick switch to staging
-envctl load staging
-npm start
-
-# Back to local
-envctl unload
-envctl load local
 ```
 
 ### API Keys and Secrets Management
+
 ```bash
 # Different API keys for different environments
 envctl create aws-dev
@@ -273,12 +347,13 @@ envctl add aws-prod AWS_SECRET_ACCESS_KEY=prod_secret
 ```
 
 ### Project-Specific Configurations
+
 ```bash
 # Create project-specific profiles
 envctl create project-alpha
 envctl add project-alpha -f ./alpha/.env
 
-envctl create project-beta  
+envctl create project-beta
 envctl add project-beta -f ./beta/.env
 
 # Switch between projects
@@ -293,18 +368,21 @@ cd ../beta && npm start
 ## Advantages Over Alternatives
 
 ### vs direnv
+
 - ✅ No dependency on folder structure or `.envrc` files
 - ✅ Manual control over when environments are loaded/unloaded
 - ✅ Can switch between profiles anywhere in the filesystem
 - ✅ Better for temporary environment switches
 
 ### vs export commands
+
 - ✅ Automatic backup and restoration of previous environment
 - ✅ Persistent storage of environment configurations
 - ✅ Easy management of multiple environment sets
 - ✅ No risk of permanently modifying your environment
 
 ### vs source .env
+
 - ✅ Proper cleanup when switching environments
 - ✅ No accumulation of environment variables
 - ✅ Centralized management across projects

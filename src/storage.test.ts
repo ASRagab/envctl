@@ -9,7 +9,7 @@ describe('Storage', () => {
   let tempDir: string
 
   beforeEach(async () => {
-    tempDir = path.join(os.tmpdir(), 'envctl-storage-test-' + Date.now())
+    tempDir = path.join(os.tmpdir(), `envctl-storage-test-${Date.now()}`)
 
     // Mock the config to use our temp directory
     jest.doMock('./config', () => ({
@@ -31,7 +31,7 @@ describe('Storage', () => {
       if (await fs.pathExists(tempDir)) {
         await fs.remove(tempDir)
       }
-    } catch (error) {
+    } catch {
       // Ignore cleanup errors
     }
     jest.resetModules()
@@ -152,10 +152,6 @@ describe('Storage', () => {
     it('should save and load state correctly', async () => {
       const testState: EnvState = {
         currentProfile: 'test-profile',
-        backup: {
-          TEST_VAR: 'original-value',
-          API_KEY: undefined,
-        },
       }
 
       await storage.saveState(testState)
@@ -174,6 +170,54 @@ describe('Storage', () => {
 
       const loaded = await storage.loadState()
       expect(loaded).toEqual({})
+    })
+  })
+
+  describe('backup file operations', () => {
+    it('should save and load backup correctly', async () => {
+      const backupData = {
+        TEST_VAR: 'original-value',
+        API_KEY: 'secret123',
+      }
+
+      await storage.saveBackup(backupData)
+
+      const loaded = await storage.loadBackup()
+      expect(loaded).toEqual(backupData)
+    })
+
+    it('should return empty object when no backup file exists', async () => {
+      const loaded = await storage.loadBackup()
+      expect(loaded).toEqual({})
+    })
+
+    it('should handle empty backup', async () => {
+      await storage.saveBackup({})
+
+      const loaded = await storage.loadBackup()
+      expect(loaded).toEqual({})
+    })
+
+    it('should clear backup file', async () => {
+      const backupData = { TEST_VAR: 'value' }
+
+      await storage.saveBackup(backupData)
+      expect(await storage.loadBackup()).toEqual(backupData)
+
+      await storage.clearBackup()
+      expect(await storage.loadBackup()).toEqual({})
+    })
+
+    it('should handle backup with special characters', async () => {
+      const backupData = {
+        DATABASE_URL: 'postgresql://user:pass@host:5432/db?param=value',
+        COMPLEX_VAR: 'value with spaces and = equals',
+      }
+
+      await storage.saveBackup(backupData)
+
+      const loaded = await storage.loadBackup()
+      expect(loaded).toEqual(backupData)
     })
   })
 

@@ -8,10 +8,10 @@ const program = new Command()
 const envManager = new EnvManager()
 
 // Helper functions
-const success = (message: string) => console.log(chalk.green('✓ ' + message))
-const error = (message: string) => console.log(chalk.red('✗ ' + message))
-const info = (message: string) => console.log(chalk.blue('ℹ ' + message))
-const warn = (message: string) => console.log(chalk.yellow('⚠ ' + message))
+const success = (message: string) => console.log(chalk.green(`✓ ${message}`))
+const error = (message: string) => console.log(chalk.red(`✗ ${message}`))
+const info = (message: string) => console.log(chalk.blue(`ℹ ${message}`))
+const warn = (message: string) => console.log(chalk.yellow(`⚠ ${message}`))
 
 program.name('envctl').description('Environment variable context manager').version('1.0.0')
 
@@ -47,6 +47,10 @@ program
         }
         const [key, ...valueParts] = keyvalue.split('=')
         const value = valueParts.join('=')
+        if (!key) {
+          error('Invalid format. Key cannot be empty')
+          process.exit(1)
+        }
         await envManager.addVariable(profile, key, value)
         success(`Added ${key} to profile '${profile}'`)
       } else {
@@ -88,7 +92,7 @@ program
         await envManager.loadProfile(profile)
         success(`Loaded profile '${profile}'`)
         warn('Note: Environment variables are only set within this CLI process.')
-        info('For shell integration, use: eval "$(envctl load --shell ' + profile + ')"')
+        info(`For shell integration, use: eval "$(envctl load --shell ${profile})"`)
         info("Or run 'envctl unload' to restore previous environment")
       }
     } catch (err) {
@@ -117,6 +121,39 @@ program
         success(`Unloaded profile '${profileName}'`)
         warn('Note: Environment variables are only unset within this CLI process.')
         info('For shell integration, use: eval "$(envctl unload --shell)"')
+      }
+    } catch (err) {
+      if (options?.shell) {
+        // In shell mode, output error to stderr so it doesn't interfere with eval
+        console.error(`Error: ${(err as Error).message}`)
+        process.exit(1)
+      } else {
+        error((err as Error).message)
+        process.exit(1)
+      }
+    }
+  })
+
+program
+  .command('switch')
+  .description('Switch to a different profile (unload current + load new)')
+  .argument('<profile>', 'Profile name to switch to')
+  .option('--shell', 'Output shell commands to source')
+  .action(async (profile: string, options?: { shell?: boolean }) => {
+    try {
+      if (options?.shell) {
+        const result = await envManager.generateSwitchCommands(profile)
+        console.log(result.commands)
+      } else {
+        const result = await envManager.switchProfile(profile)
+        if (result.from) {
+          success(`Switched from '${result.from}' to '${result.to}'`)
+        } else {
+          success(`Loaded profile '${result.to}'`)
+        }
+        warn('Note: Environment variables are only changed within this CLI process.')
+        info(`For shell integration, use: eval "$(envctl switch --shell ${profile})"`)
+        info(`Or use the convenience function: envctl-switch ${profile} (after running envctl setup)`)
       }
     } catch (err) {
       if (options?.shell) {
@@ -225,12 +262,63 @@ program
       info(`Added to: ${result.rcFile}`)
       info('')
       info('Available functions:')
-      info('  envctl-load <profile>  (or: ecl <profile>)')
-      info('  envctl-unload          (or: ecu)')
-      info('  envctl status          (or: ecs)')
-      info('  envctl list            (or: ecls)')
+      info('  envctl-load <profile>   (or: ecl <profile>)')
+      info('  envctl-unload           (or: ecu)')
+      info('  envctl-switch <profile> (or: ecsw <profile>)')
+      info('  envctl status           (or: ecs)')
+      info('  envctl list             (or: ecls)')
       info('')
-      warn('Please restart your shell or run: source ' + result.rcFile)
+      warn(`Please restart your shell or run: source ${result.rcFile}`)
+    } catch (err) {
+      error((err as Error).message)
+      process.exit(1)
+    }
+  })
+
+program
+  .command('unsetup')
+  .description('Remove shell integration and optionally all envctl data')
+  .option('--all', 'Remove all envctl data including profiles (WARNING: destructive)')
+  .action(async (options?: { all?: boolean }) => {
+    try {
+      if (options?.all) {
+        // Confirm destructive action
+        console.log(chalk.yellow('⚠ WARNING: This will remove ALL envctl data including:'))
+        console.log('  - All profiles and their environment variables')
+        console.log('  - Shell integration functions')
+        console.log('  - Configuration files')
+        console.log('')
+
+        // For now, we'll proceed - in a real implementation you might want to add confirmation
+        const shellResult = await envManager.unsetupShellIntegration()
+        const dataResult = await envManager.cleanupAllData()
+
+        const allRemoved = [...shellResult.removed, ...dataResult.removed]
+
+        if (allRemoved.length > 0) {
+          success('Complete cleanup completed!')
+          info('Removed:')
+          allRemoved.forEach((item) => info(`  - ${item}`))
+        } else {
+          info('No envctl data found to remove')
+        }
+      } else {
+        // Just remove shell integration
+        const result = await envManager.unsetupShellIntegration()
+
+        if (result.removed.length > 0) {
+          success('Shell integration removed successfully!')
+          info('Removed:')
+          result.removed.forEach((item) => info(`  - ${item}`))
+          info('')
+          warn(`Please restart your shell or run: source ${result.rcFile}`)
+          info('')
+          info('Your profiles and data are still available.')
+          info('Use "envctl unsetup --all" to remove everything.')
+        } else {
+          info('No shell integration found to remove')
+        }
+      }
     } catch (err) {
       error((err as Error).message)
       process.exit(1)

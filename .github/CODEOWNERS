@@ -1,0 +1,15 @@
+# Global owners
+* @ASRagab
+
+# CI/CD and workflows
+/.github/ @ASRagab
+
+# Package and dependencies
+/package.json @ASRagab
+/package-lock.json @ASRagab
+/pnpm-lock.yaml @ASRagab
+
+# Configuration files
+/.eslintrc.js @ASRagab
+/tsconfig.json @ASRagab
+/jest.config.js @ASRagab

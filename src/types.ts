@@ -1,18 +1,16 @@
-
 export interface Profile {
-  name: string;
-  variables: Record<string, string>;
-  createdAt: Date;
-  updatedAt: Date;
+  name: string
+  variables: Record<string, string>
+  createdAt: Date
+  updatedAt: Date
 }
 
 export interface EnvState {
-  currentProfile?: string;
-  backup?: Record<string, string | undefined>;
+  currentProfile?: string
 }
 
 export interface Config {
-  profilesDir: string;
-  stateFile: string;
-  configDir: string;
+  profilesDir: string
+  stateFile: string
+  configDir: string
 }
