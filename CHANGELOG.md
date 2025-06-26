@@ -1,0 +1,11 @@
+# 1.0.0 (2025-06-26)
+
+### Bug Fixes
+
+- **build:** cache build file should be cleaned as well ([87c535c](https://github.com/ASRagab/envctl/commit/87c535cd7b5a6401dff954338f320799dca41f00))
+- **build:** updated runner in scripts ([5042ca5](https://github.com/ASRagab/envctl/commit/5042ca59b0e77086579e65299f917a931a9d6d71))
+- **build:** updating build rocess ([bea9340](https://github.com/ASRagab/envctl/commit/bea934044c06e247e317695d76140b56b1cc4b5c))
+- **ci:** release ([d512e43](https://github.com/ASRagab/envctl/commit/d512e430ec1fc493f07401609db9bfd864711619))
+- **ci:** token update ([3405368](https://github.com/ASRagab/envctl/commit/3405368c0a722ad20445540ac4131cfd1a19a1b3))
+- **ci:** updating pnpm ([5dcc383](https://github.com/ASRagab/envctl/commit/5dcc383f11a7e4e6d802abde918558831cc2ae61))
+- **lock-file:** Updating lockfile ([974ee0a](https://github.com/ASRagab/envctl/commit/974ee0a954a86fcf5e3e5bdd67c84cd6346dce87))
