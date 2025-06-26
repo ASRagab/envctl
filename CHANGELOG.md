@@ -1,3 +1,9 @@
+## [1.0.1](https://github.com/ASRagab/envctl/compare/v1.0.0...v1.0.1) (2025-06-26)
+
+### Bug Fixes
+
+- publishing and releasing ([7a5b749](https://github.com/ASRagab/envctl/commit/7a5b7490462477759a97453c9213037fab1ab9c8))
+
 # 1.0.0 (2025-06-26)
 
 ### Bug Fixes
