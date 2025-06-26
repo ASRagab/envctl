@@ -44,7 +44,7 @@ source ~/.bashrc  # or ~/.zshrc for zsh users
 
 If you prefer manual setup or the automatic setup doesn't work:
 
-**Option 1: Use eval (Quick method)**
+#### Option 1: Use eval (Quick method)
 
 ```bash
 # Load a profile
@@ -57,11 +57,11 @@ eval "$(envctl switch --shell staging)"
 eval "$(envctl unload --shell)"
 ```
 
-**Option 2: Manual shell functions installation**
+#### Option 2: Manual shell functions installation\*\*
 
 ```bash
 # Download the shell integration script
-curl -o ~/.envctl-integration.sh https://raw.githubusercontent.com/yourusername/envctl/main/shell-integration.sh
+curl -o ~/.envctl-integration.sh https://raw.githubusercontent.com/ASRagab/envctl/main/shell-integration.sh
 
 # Add to your ~/.bashrc or ~/.zshrc
 echo 'source ~/.envctl-integration.sh' >> ~/.bashrc
