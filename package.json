@@ -18,7 +18,7 @@
     "build:watch": "tsc --watch",
     "dev": "ts-node src/cli.ts",
     "dev:watch": "ts-node --watch src/cli.ts",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "clean:all": "rm -rf dist node_modules coverage .tsbuildinfo",
     "prebuild": "pnpm run clean",
     "prepublishOnly": "pnpm run build",
