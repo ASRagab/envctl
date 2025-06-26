@@ -1,6 +1,6 @@
 # envctl
 
-A powerful environment variable context manager for development workflows. Easily create, manage, and switch between different sets of environment variables.
+A environment variable context manager for development workflows. Easily create, manage, and switch between different sets of environment variables.
 
 ## Features
 
@@ -9,8 +9,6 @@ A powerful environment variable context manager for development workflows. Easil
 - ✅ Load and unload profiles with proper environment restoration
 - ✅ Remove and update individual variables
 - ✅ Export profiles for sharing or backup
-- ✅ Cross-platform support (Windows, macOS, Linux)
-- ✅ TypeScript-based with full type safety
 - ✅ No folder structure dependency (unlike direnv)
 
 ## Installation
