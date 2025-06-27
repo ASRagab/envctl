@@ -344,10 +344,8 @@ FINAL_VALID=final`
         updatedAt: new Date(),
       }))
 
-      // Save all profiles concurrently
       await Promise.all(profiles.map((profile) => storage.saveProfile(profile)))
 
-      // Load all profiles concurrently
       const loaded = await Promise.all(profiles.map((profile) => storage.loadProfile(profile.name)))
 
       expect(loaded).toHaveLength(10)

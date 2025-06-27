@@ -80,7 +80,6 @@ export class Storage {
       return
     }
 
-    // Convert to .env format
     const envContent = Object.entries(variables)
       .map(([key, value]) => `${key}=${value}`)
       .join('\n')
@@ -113,7 +112,6 @@ export class Storage {
     for (const line of content.split('\n')) {
       const trimmedLine = line.trim()
 
-      // Skip empty lines and comments
       if (!trimmedLine || trimmedLine.startsWith('#')) {
         continue
       }
@@ -126,7 +124,6 @@ export class Storage {
       const key = trimmedLine.substring(0, equalIndex).trim()
       const value = trimmedLine.substring(equalIndex + 1).trim()
 
-      // Remove quotes if present
       variables[key] = value.replace(/^["']|["']$/g, '')
     }
 

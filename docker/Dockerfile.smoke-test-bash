@@ -1,0 +1,37 @@
+FROM node:18-alpine
+
+# Install shell and system utilities needed for testing
+RUN apk add --no-cache bash curl
+
+# Install pnpm
+RUN npm install -g pnpm@9.0.0
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package.json pnpm-lock.yaml ./
+
+# Install dependencies
+RUN pnpm install
+
+# Copy source code
+COPY . .
+
+# Build the project
+RUN pnpm run build
+
+# Make the CLI executable and create a symlink for global access
+RUN chmod +x dist/cli.js
+RUN ln -s /app/dist/cli.js /usr/local/bin/envctl
+
+# Copy smoke test script
+COPY scripts/smoke-test.sh /smoke-test.sh
+RUN chmod +x /smoke-test.sh
+
+# Set up bash environment
+ENV SHELL=/bin/bash
+SHELL ["/bin/bash", "-c"]
+
+# Run smoke tests by default
+CMD ["/smoke-test.sh"] 

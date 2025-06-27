@@ -2,6 +2,7 @@
 
 import { Command } from 'commander'
 import chalk from 'chalk'
+import * as readline from 'readline'
 import { EnvManager } from './env-manager'
 
 const program = new Command()
@@ -279,31 +280,68 @@ program
   .command('unsetup')
   .description('Remove shell integration and optionally all envctl data')
   .option('--all', 'Remove all envctl data including profiles (WARNING: destructive)')
-  .action(async (options?: { all?: boolean }) => {
+  .option('--force', 'Skip confirmation prompts (for non-interactive use)')
+  .action(async (options?: { all?: boolean; force?: boolean }) => {
     try {
       if (options?.all) {
-        // Confirm destructive action
+        // Show warning
         console.log(chalk.yellow('⚠ WARNING: This will remove ALL envctl data including:'))
         console.log('  - All profiles and their environment variables')
         console.log('  - Shell integration functions')
         console.log('  - Configuration files')
         console.log('')
 
-        // For now, we'll proceed - in a real implementation you might want to add confirmation
-        const shellResult = await envManager.unsetupShellIntegration()
-        const dataResult = await envManager.cleanupAllData()
+        // Check if we need confirmation
+        let shouldProceed = false
 
-        const allRemoved = [...shellResult.removed, ...dataResult.removed]
-
-        if (allRemoved.length > 0) {
-          success('Complete cleanup completed!')
-          info('Removed:')
-          allRemoved.forEach((item) => info(`  - ${item}`))
+        if (options?.force) {
+          // Force flag bypasses confirmation
+          shouldProceed = true
+        } else if (!process.stdin.isTTY) {
+          // Non-interactive environment (CI/automated scripts)
+          console.log(chalk.red('✗ Cannot proceed: This is a destructive operation'))
+          console.log('  In non-interactive environments, use --force to confirm')
+          console.log('  Example: envctl unsetup --all --force')
+          process.exit(1)
         } else {
-          info('No envctl data found to remove')
+          // Interactive confirmation
+          const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+          })
+
+          try {
+            const answer = await new Promise<string>((resolve) => {
+              rl.question(chalk.yellow('Are you sure you want to proceed? Type "yes" to confirm: '), resolve)
+            })
+
+            shouldProceed = answer.toLowerCase() === 'yes'
+
+            if (!shouldProceed) {
+              console.log(chalk.blue('ℹ Operation cancelled.'))
+              process.exit(0)
+            }
+          } finally {
+            rl.close()
+          }
+        }
+
+        if (shouldProceed) {
+          const shellResult = await envManager.unsetupShellIntegration()
+          const dataResult = await envManager.cleanupAllData()
+
+          const allRemoved = [...shellResult.removed, ...dataResult.removed]
+
+          if (allRemoved.length > 0) {
+            success('Complete cleanup completed!')
+            info('Removed:')
+            allRemoved.forEach((item) => info(`  - ${item}`))
+          } else {
+            info('No envctl data found to remove')
+          }
         }
       } else {
-        // Just remove shell integration
+        // Just remove shell integration (no confirmation needed)
         const result = await envManager.unsetupShellIntegration()
 
         if (result.removed.length > 0) {

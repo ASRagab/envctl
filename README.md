@@ -271,7 +271,7 @@ envctl setup
 
 This installs shell functions (`envctl-load`, `envctl-unload`, `envctl-switch`) and convenient aliases (`ecl`, `ecu`, `ecsw`, `ecs`, `ecls`) to your shell.
 
-### `envctl unsetup [--all]`
+### `envctl unsetup [--all] [--force]`
 
 Remove shell integration and optionally all envctl data.
 
@@ -281,6 +281,9 @@ envctl unsetup
 
 # Remove everything including all profiles and data (WARNING: destructive)
 envctl unsetup --all
+
+# Remove everything without confirmation prompt (for CI/scripts)
+envctl unsetup --all --force
 ```
 
 **What `envctl unsetup` removes:**
@@ -296,6 +299,8 @@ envctl unsetup --all
 - State and backup files
 
 ⚠️ **Warning:** The `--all` flag is destructive and cannot be undone. Use with caution.
+
+> **Note:** The `--all` flag requires interactive confirmation unless `--force` is used. In non-interactive environments (CI/CD), use `--force` to bypass the confirmation prompt.
 
 ## How It Works
 
@@ -401,6 +406,26 @@ npm run build
 
 # Run tests
 npm test
+
+# Run smoke tests (comprehensive integration tests)
+npm run smoke-test
+```
+
+### Smoke Testing
+
+For comprehensive testing in isolated Docker environments, see [SMOKE-TESTS.md](SMOKE-TESTS.md).
+
+Quick smoke test commands:
+
+```bash
+# Run full smoke test suite
+npm run smoke-test
+
+# Debug mode for interactive testing
+npm run smoke-test:debug
+
+# Using Docker Compose
+npm run smoke-test:compose
 ```
 
 ## Contributing

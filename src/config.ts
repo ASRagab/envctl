@@ -1,4 +1,3 @@
-// src/config.ts
 import path from 'path'
 import os from 'os'
 import { Config } from './types'
