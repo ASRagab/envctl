@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  smoke-test:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.smoke-test
+    container_name: envctl-smoke-test
+    environment:
+      - NODE_ENV=test
+      - SHELL=/bin/bash
+    # Use tmpfs to ensure clean isolated filesystem for each run
+    tmpfs:
+      - /tmp
+      - /root/.envctl
+    # Ensure proper cleanup after tests
+    volumes:
+      - /dev/null:/root/.bash_history
+
+  # Interactive version for debugging
+  smoke-test-debug:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.smoke-test
+    container_name: envctl-smoke-test-debug
+    environment:
+      - NODE_ENV=test
+      - SHELL=/bin/bash
+    tmpfs:
+      - /tmp
+      - /root/.envctl
+    volumes:
+      - .:/app:ro
+      - /dev/null:/root/.bash_history
+    entrypoint: /bin/bash
+    stdin_open: true
+    tty: true

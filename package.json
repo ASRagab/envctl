@@ -36,6 +36,13 @@
     "precommit": "pnpm run lint && pnpm run type-check && pnpm run test:ci",
     "prepare": "husky install || true",
     "start": "node dist/cli.js",
+    "smoke-test": "./scripts/run-smoke-tests.sh",
+    "smoke-test:compose": "./scripts/run-smoke-tests-compose.sh",
+    "smoke-test:debug": "./scripts/debug-smoke-tests.sh",
+    "smoke-test:node18": "./scripts/run-smoke-tests-node18.sh",
+    "smoke-test:node20": "./scripts/run-smoke-tests-node20.sh",
+    "smoke-test:node22": "./scripts/run-smoke-tests-node22.sh",
+    "smoke-test:zsh": "./scripts/run-smoke-tests-zsh.sh",
     "release": "semantic-release",
     "release:dry": "semantic-release --dry-run"
   },
@@ -94,7 +101,7 @@
     "typescript": "^5.8.3"
   },
   "engines": {
-    "node": ">=16.0.0",
+    "node": ">=18.0.0",
     "pnpm": ">=9.0.0"
   },
   "lint-staged": {

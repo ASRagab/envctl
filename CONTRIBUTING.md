@@ -6,7 +6,7 @@ Thank you for your interest in contributing to envctl! This guide will help you 
 
 ### Prerequisites
 
-- Node.js >= 16.0.0 (we recommend using the version specified in `.nvmrc`)
+- Node.js >= 18.0.0 (we recommend using the version specified in `.nvmrc`)
 - npm or pnpm (pnpm is recommended for faster installs)
 
 ### Getting Started

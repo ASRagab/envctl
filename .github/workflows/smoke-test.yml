@@ -1,0 +1,93 @@
+name: Smoke Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Allow manual triggering
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    name: Run Smoke Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build smoke test image
+        run: |
+          docker build -f docker/Dockerfile.smoke-test -t envctl-smoke-test .
+
+      - name: Run smoke tests
+        run: |
+          docker run --rm envctl-smoke-test
+
+      - name: Clean up Docker images
+        if: always()
+        run: |
+          docker rmi envctl-smoke-test || true
+          docker system prune -f || true
+
+  # Additional job to test with different Node.js versions
+  compatibility-test:
+    name: Node.js Compatibility Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20, 22]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build compatibility test image
+        run: |
+          docker build -f docker/Dockerfile.smoke-test-node${{ matrix.node-version }} -t envctl-smoke-test-node${{ matrix.node-version }} .
+
+      - name: Run compatibility tests
+        run: |
+          docker run --rm envctl-smoke-test-node${{ matrix.node-version }}
+
+      - name: Clean up
+        if: always()
+        run: |
+          docker rmi envctl-smoke-test-node${{ matrix.node-version }} || true
+          docker system prune -f || true
+
+  # Test with different shell environments
+  shell-compatibility-test:
+    name: Shell Compatibility Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        shell: [bash, zsh]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build shell-specific test image
+        run: |
+          docker build -f docker/Dockerfile.smoke-test-${{ matrix.shell }} -t envctl-smoke-test-${{ matrix.shell }} .
+
+      - name: Run shell compatibility tests
+        run: |
+          docker run --rm envctl-smoke-test-${{ matrix.shell }}
+
+      - name: Clean up
+        if: always()
+        run: |
+          docker rmi envctl-smoke-test-${{ matrix.shell }} || true
+          docker system prune -f || true

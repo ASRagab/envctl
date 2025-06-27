@@ -103,10 +103,8 @@ export class EnvManager {
       }
     }
 
-    // Save backup to file
     await this.storage.saveBackup(backup)
 
-    // Load new environment
     for (const [key, value] of Object.entries(profile.variables)) {
       process.env[key] = value
     }
@@ -129,7 +127,6 @@ export class EnvManager {
       throw new Error(`Profile '${profileName}' not found`)
     }
 
-    // Load backup from file
     const backup = await this.storage.loadBackup()
 
     // Restore environment - smart restore logic
@@ -143,7 +140,6 @@ export class EnvManager {
       }
     }
 
-    // Clear backup file and state
     await this.storage.clearBackup()
     await this.storage.saveState({})
 
@@ -154,12 +150,10 @@ export class EnvManager {
     const state = await this.storage.loadState()
     let fromProfile: string | undefined
 
-    // If a profile is currently loaded, unload it first
     if (state.currentProfile) {
       fromProfile = await this.unloadProfile()
     }
 
-    // Load the new profile
     await this.loadProfile(profileName)
 
     return fromProfile !== undefined ? { from: fromProfile, to: profileName } : { to: profileName }
@@ -243,12 +237,10 @@ export class EnvManager {
       backupCommands.push(`[ -n "\${${key}+x}" ] && echo "${key}=$${key}" >> ~/.envctl/backup.env`)
     }
 
-    // Generate set commands
     for (const [key, value] of Object.entries(profile.variables)) {
       setCommands.push(`export ${key}="${value}"`)
     }
 
-    // Save state
     await this.storage.saveState({
       currentProfile: profileName,
     })
@@ -269,7 +261,6 @@ export class EnvManager {
 
     const commands: string[] = []
 
-    // Restore environment variables from backup file
     for (const key of Object.keys(profile.variables)) {
       commands.push(`if grep -q "^${key}=" ~/.envctl/backup.env 2>/dev/null; then`)
       commands.push(`  export ${key}="$(grep "^${key}=" ~/.envctl/backup.env | cut -d'=' -f2-)"`)
@@ -278,10 +269,8 @@ export class EnvManager {
       commands.push(`fi`)
     }
 
-    // Remove backup file
     commands.push('rm -f ~/.envctl/backup.env')
 
-    // Clear state
     await this.storage.saveState({})
 
     return {
@@ -300,7 +289,6 @@ export class EnvManager {
     let fromProfile: string | undefined
     const commands: string[] = []
 
-    // If a profile is currently loaded, generate unload commands first
     if (state.currentProfile) {
       fromProfile = state.currentProfile
       const currentProfile = await this.storage.loadProfile(state.currentProfile)
@@ -308,7 +296,6 @@ export class EnvManager {
         throw new Error(`Current profile '${state.currentProfile}' not found`)
       }
 
-      // Restore environment variables from backup file for current profile
       for (const key of Object.keys(currentProfile.variables)) {
         commands.push(`if grep -q "^${key}=" ~/.envctl/backup.env 2>/dev/null; then`)
         commands.push(`  export ${key}="$(grep "^${key}=" ~/.envctl/backup.env | cut -d'=' -f2-)"`)
@@ -317,7 +304,6 @@ export class EnvManager {
         commands.push(`fi`)
       }
 
-      // Remove old backup file
       commands.push('rm -f ~/.envctl/backup.env')
     }
 
@@ -327,12 +313,10 @@ export class EnvManager {
       commands.push(`[ -n "\${${key}+x}" ] && echo "${key}=$${key}" >> ~/.envctl/backup.env`)
     }
 
-    // Generate set commands for new profile
     for (const [key, value] of Object.entries(newProfile.variables)) {
       commands.push(`export ${key}="${value}"`)
     }
 
-    // Save new state
     await this.storage.saveState({
       currentProfile: profileName,
     })
@@ -346,7 +330,6 @@ export class EnvManager {
     const homeDir = this.deps.os.homedir()
     const shell = process.env['SHELL'] || ''
 
-    // Determine the appropriate RC file
     let rcFile: string
     if (shell.includes('zsh')) {
       rcFile = this.deps.path.join(homeDir, '.zshrc')
@@ -355,14 +338,10 @@ export class EnvManager {
     } else if (shell.includes('fish')) {
       rcFile = this.deps.path.join(homeDir, '.config', 'fish', 'config.fish')
     } else {
-      // Default to .bashrc
       rcFile = this.deps.path.join(homeDir, '.bashrc')
     }
 
-    // Copy shell integration script to home directory
     const integrationFile = this.deps.path.join(homeDir, '.envctl-integration.sh')
-
-    // Get the shell integration script content
     const scriptPath = this.deps.path.join(__dirname, '..', 'shell-integration.sh')
 
     let scriptContent: string
@@ -435,11 +414,9 @@ alias ecsw='envctl-switch'
 `
     }
 
-    // Write the integration script
     await this.deps.fs.writeFile(integrationFile, scriptContent)
     await this.deps.fs.chmod(integrationFile, 0o755)
 
-    // Check if the source line already exists
     const sourceLine = `source ~/.envctl-integration.sh`
     let rcContent = ''
 
@@ -448,7 +425,6 @@ alias ecsw='envctl-switch'
     }
 
     if (!rcContent.includes(sourceLine)) {
-      // Add the source line
       const newContent = `${rcContent}\n# envctl shell integration\n${sourceLine}\n`
       await this.deps.fs.writeFile(rcFile, newContent)
     }
@@ -460,7 +436,6 @@ alias ecsw='envctl-switch'
     const homeDir = this.deps.os.homedir()
     const shell = process.env['SHELL'] || ''
 
-    // Determine the appropriate RC file (same logic as setup)
     let rcFile: string
     if (shell.includes('zsh')) {
       rcFile = this.deps.path.join(homeDir, '.zshrc')
@@ -469,20 +444,17 @@ alias ecsw='envctl-switch'
     } else if (shell.includes('fish')) {
       rcFile = this.deps.path.join(homeDir, '.config', 'fish', 'config.fish')
     } else {
-      // Default to .bashrc
       rcFile = this.deps.path.join(homeDir, '.bashrc')
     }
 
     const integrationFile = this.deps.path.join(homeDir, '.envctl-integration.sh')
     const removed: string[] = []
 
-    // Remove integration file
     if (await this.deps.fs.pathExists(integrationFile)) {
       await this.deps.fs.remove(integrationFile)
       removed.push(integrationFile)
     }
 
-    // Remove lines from RC file
     if (await this.deps.fs.pathExists(rcFile)) {
       const rcContent = await this.deps.fs.readFile(rcFile, 'utf-8')
       const lines = rcContent.split('\n')
