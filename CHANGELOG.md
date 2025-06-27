@@ -1,3 +1,9 @@
+# [1.1.0](https://github.com/ASRagab/envctl/compare/v1.0.1...v1.1.0) (2025-06-27)
+
+### Features
+
+- **smoke-tests:** Adding smoke tests ([1d4205a](https://github.com/ASRagab/envctl/commit/1d4205a1fa161a878616e6be1ca8d39594b24f11))
+
 ## [1.0.1](https://github.com/ASRagab/envctl/compare/v1.0.0...v1.0.1) (2025-06-26)
 
 ### Bug Fixes

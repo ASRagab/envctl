@@ -1,6 +1,6 @@
 {
   "name": "@twelvehart/envctl",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Environment variable context manager for development workflows",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
