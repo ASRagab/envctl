@@ -61,7 +61,7 @@ eval "$(envctl unload --shell)"
 
 ```bash
 # Download the shell integration script
-curl -o ~/.envctl-integration.sh https://raw.githubusercontent.com/yourusername/envctl/main/shell-integration.sh
+curl -o ~/.envctl-integration.sh https://raw.githubusercontent.com/ASRagab/envctl/main/shell-integration.sh
 
 # Add to your ~/.bashrc or ~/.zshrc
 echo 'source ~/.envctl-integration.sh' >> ~/.bashrc
