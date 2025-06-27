@@ -1,3 +1,9 @@
+## [1.1.1](https://github.com/ASRagab/envctl/compare/v1.1.0...v1.1.1) (2025-06-27)
+
+### Bug Fixes
+
+- **installer:** bug in installation no tslib ([fb10453](https://github.com/ASRagab/envctl/commit/fb1045394849a02439c869510e59963dd639c678))
+
 # [1.1.0](https://github.com/ASRagab/envctl/compare/v1.0.1...v1.1.0) (2025-06-27)
 
 ### Features
