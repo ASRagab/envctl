@@ -409,6 +409,9 @@ npm test
 
 # Run smoke tests (comprehensive integration tests)
 npm run smoke-test
+
+# Test user installation experience (important for catching dependency issues)
+npm run test:user-install
 ```
 
 ### Smoke Testing

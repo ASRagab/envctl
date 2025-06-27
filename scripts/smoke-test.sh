@@ -86,6 +86,23 @@ else
   exit 1
 fi
 
+# Test 1.5: Validate proper user installation simulation
+echo -e "${YELLOW}Validating user installation simulation...${NC}"
+# Check that we're using the globally installed version, not local dev version
+ENVCTL_PATH=$(which envctl)
+if [[ "$ENVCTL_PATH" == "/usr/local/bin/envctl" ]]; then
+  print_test "Global installation path" "PASS" "Using globally installed envctl"
+else
+  print_test "Global installation path" "FAIL" "envctl path: $ENVCTL_PATH"
+fi
+
+# Verify no development artifacts remain
+if [ ! -d "/app/node_modules" ] && [ ! -d "/app/dist" ] && [ ! -d "/app/src" ]; then
+  print_test "Development cleanup" "PASS" "Development files properly cleaned up"
+else
+  print_test "Development cleanup" "FAIL" "Development files still present"
+fi
+
 # Test 2: Shell integration setup
 echo -e "${YELLOW}Testing shell integration setup...${NC}"
 if envctl setup >/dev/null 2>&1; then

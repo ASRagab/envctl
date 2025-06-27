@@ -7,10 +7,71 @@ This document describes the comprehensive smoke testing setup for `envctl`, desi
 The smoke testing setup provides:
 
 - **Isolated Docker Environment**: Tests run in clean containers with no external dependencies
+- **True User Installation Simulation**: Tests use `npm pack` + `npm install -g` to replicate the exact user experience
 - **Shell Integration Testing**: Verifies that shell functions work correctly with environment variable management
 - **Comprehensive Test Coverage**: Tests all major functionality including profile management, variable handling, and shell state verification
 - **CI/CD Integration**: Automated testing in GitHub Actions with Docker-in-Docker support
 - **Cross-Platform Compatibility**: Tests across different Node.js versions and shell environments
+
+## Critical Design Decision: User Installation Simulation
+
+**⚠️ Important:** Our smoke tests simulate the actual user installation process using `npm pack` followed by `npm install -g`. This is crucial because:
+
+### The Problem We Solve
+
+- **Development Environment** (`pnpm install`): Installs ALL dependencies including `devDependencies`
+- **User Environment** (`npm install -g`): Only installs production `dependencies`
+
+### Real-World Example
+
+We discovered that `tslib` was listed as a `devDependency` instead of a `dependency`, causing the CLI to fail with:
+
+```
+Error: Cannot find module 'tslib'
+```
+
+This occurred because:
+
+1. **Local Development**: `tslib` was available (installed via `pnpm install`)
+2. **Original Smoke Tests**: Used `pnpm install`, so `tslib` was available
+3. **User Installation**: Only production dependencies installed, so `tslib` was missing
+
+### Our Solution
+
+The Dockerfile now:
+
+1. **Builds** using full development dependencies (`pnpm install`)
+2. **Packages** the built code (`npm pack`)
+3. **Installs globally** like a user would (`npm install -g package.tgz`)
+4. **Cleans up** development artifacts to ensure only the global installation is used
+5. **Validates** the installation path and cleanup
+
+This ensures our tests catch dependency mismatches that would affect real users.
+
+## Additional Testing Tools
+
+### User Installation Test Script
+
+We provide a standalone script to test the user installation experience:
+
+```bash
+# Test user installation locally
+npm run test:user-install
+
+# This script:
+# 1. Builds the project
+# 2. Creates a package tarball (npm pack)
+# 3. Installs it globally (npm install -g)
+# 4. Tests all basic functionality
+# 5. Cleans up the installation
+```
+
+This script is especially useful for:
+
+- Pre-release validation
+- Catching dependency issues early
+- Local development testing
+- CI/CD pipeline integration
 
 ## Test Architecture
 
