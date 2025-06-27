@@ -3,16 +3,14 @@ FROM node:18-alpine
 # Install shell and system utilities needed for testing
 RUN apk add --no-cache bash curl
 
-# Install pnpm
-RUN npm install -g pnpm@9.0.0
-
 # Set working directory
 WORKDIR /app
 
-# Copy package files
+# Copy package files first for dependency installation (development phase)
 COPY package.json pnpm-lock.yaml ./
 
-# Install dependencies
+# Install pnpm and dependencies for building
+RUN npm install -g pnpm@9.0.0
 RUN pnpm install
 
 # Copy source code
@@ -21,13 +19,20 @@ COPY . .
 # Build the project
 RUN pnpm run build
 
-# Make the CLI executable and create a symlink for global access
-RUN chmod +x dist/cli.js
-RUN ln -s /app/dist/cli.js /usr/local/bin/envctl
-
-# Copy smoke test script
+# Copy smoke test script before cleanup
 COPY scripts/smoke-test.sh /smoke-test.sh
 RUN chmod +x /smoke-test.sh
+
+# Now simulate actual user installation process
+# 1. Create package tarball (like what npm publish creates)
+RUN npm pack
+
+# 2. Install the package globally like a real user would
+# This only installs production dependencies, not devDependencies
+RUN PACKAGE_FILE=$(ls *.tgz) && npm install -g "$PACKAGE_FILE"
+
+# 3. Clean up development files to ensure we're only using the globally installed version
+RUN rm -rf node_modules dist src *.tgz
 
 # Set up bash environment
 ENV SHELL=/bin/bash
