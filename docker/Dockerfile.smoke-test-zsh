@@ -10,7 +10,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
 
 # Install pnpm and dependencies for building
-RUN npm install -g pnpm@9.0.0
+RUN npm install -g pnpm@10.0.0
 RUN pnpm install
 
 # Copy source code
