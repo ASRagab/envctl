@@ -16,7 +16,7 @@ A environment variable context manager for development workflows. Easily create,
 ### From npm
 
 ```bash
-npm install -g envctl
+npm install -g @twelvehart/envctl
 ```
 
 ### Quick Setup (Recommended)
