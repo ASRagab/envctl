@@ -1,3 +1,9 @@
+# [1.2.0](https://github.com/ASRagab/envctl/compare/v1.1.1...v1.2.0) (2025-06-28)
+
+### Features
+
+- **core:** add multiple key-value pairs simultaneously ([08cfd2a](https://github.com/ASRagab/envctl/commit/08cfd2aa84cbddb179273299bc3a768787c72446))
+
 ## [1.1.1](https://github.com/ASRagab/envctl/compare/v1.1.0...v1.1.1) (2025-06-27)
 
 ### Bug Fixes
