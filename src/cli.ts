@@ -32,30 +32,58 @@ program
 
 program
   .command('add')
-  .description('Add/update environment variable')
+  .description('Add/update environment variable(s)')
   .argument('<profile>', 'Profile name')
-  .argument('[keyvalue]', 'KEY=VALUE pair')
+  .argument('[keyvalue...]', 'KEY=VALUE pairs')
   .option('-f, --file <path>', 'Load variables from file')
-  .action(async (profile: string, keyvalue?: string, options?: { file?: string }) => {
+  .action(async (profile: string, keyvalues?: string[], options?: { file?: string }) => {
     try {
       if (options?.file) {
         const count = await envManager.addVariablesFromFile(profile, options.file)
         success(`Added ${count} variables from '${options.file}' to profile '${profile}'`)
-      } else if (keyvalue) {
-        if (!keyvalue.includes('=')) {
-          error('Invalid format. Use KEY=VALUE')
-          process.exit(1)
+      } else if (keyvalues && keyvalues.length > 0) {
+        const processedVars: Record<string, string> = {}
+        const duplicateKeys: string[] = []
+
+        for (const keyvalue of keyvalues) {
+          if (!keyvalue.includes('=')) {
+            error(`Invalid format for '${keyvalue}'. Use KEY=VALUE`)
+            process.exit(1)
+          }
+          const [key, ...valueParts] = keyvalue.split('=')
+          const value = valueParts.join('=')
+          if (!key) {
+            error(`Invalid format for '${keyvalue}'. Key cannot be empty`)
+            process.exit(1)
+          }
+
+          if (processedVars[key] !== undefined) {
+            // If key is a duplicate, add it to duplicateKeys if it's not already there
+            if (!duplicateKeys.includes(key)) {
+              duplicateKeys.push(key)
+            }
+          }
+
+          processedVars[key] = value
         }
-        const [key, ...valueParts] = keyvalue.split('=')
-        const value = valueParts.join('=')
-        if (!key) {
-          error('Invalid format. Key cannot be empty')
-          process.exit(1)
+
+        for (const [key, value] of Object.entries(processedVars)) {
+          await envManager.addVariable(profile, key, value)
         }
-        await envManager.addVariable(profile, key, value)
-        success(`Added ${key} to profile '${profile}'`)
+
+        const addedKeys = Object.keys(processedVars)
+
+        if (addedKeys.length === 1) {
+          success(`Added ${addedKeys[0]} to profile '${profile}'`)
+        } else {
+          success(`Added ${addedKeys.length} variables (${addedKeys.join(', ')}) to profile '${profile}'`)
+        }
+
+        if (duplicateKeys.length > 0) {
+          warn(`Duplicate keys detected: ${duplicateKeys.join(', ')} (used last value for each)`)
+        }
       } else {
-        error('Either provide KEY=VALUE or use --file option')
+        error('Either provide KEY=VALUE pairs or use --file option')
         process.exit(1)
       }
     } catch (err) {

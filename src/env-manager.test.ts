@@ -87,6 +87,55 @@ describe('EnvManager', () => {
       expect(profile?.variables.TEST_VAR).toBe('new-value')
     })
 
+    it('should add multiple variables in sequence', async () => {
+      await envManager.addVariable('test-profile', 'VAR1', 'value1')
+      await envManager.addVariable('test-profile', 'VAR2', 'value2')
+      await envManager.addVariable('test-profile', 'VAR3', 'value3')
+
+      const profile = await envManager.getProfile('test-profile')
+      expect(profile?.variables).toEqual({
+        VAR1: 'value1',
+        VAR2: 'value2',
+        VAR3: 'value3',
+      })
+    })
+
+    it('should handle variables with special characters in values', async () => {
+      await envManager.addVariable('test-profile', 'DATABASE_URL', 'postgresql://user:pass@host:5432/db')
+      await envManager.addVariable('test-profile', 'SPECIAL_VAR', 'value with spaces and = signs')
+
+      const profile = await envManager.getProfile('test-profile')
+      expect(profile?.variables.DATABASE_URL).toBe('postgresql://user:pass@host:5432/db')
+      expect(profile?.variables.SPECIAL_VAR).toBe('value with spaces and = signs')
+    })
+
+    it('should handle duplicate keys by taking the last value', async () => {
+      // Simulate what the CLI does with duplicate keys
+      await envManager.addVariable('test-profile', 'DATABASE_URL', 'first-value')
+      await envManager.addVariable('test-profile', 'API_KEY', 'secret123')
+      await envManager.addVariable('test-profile', 'DATABASE_URL', 'second-value')
+      await envManager.addVariable('test-profile', 'DATABASE_URL', 'final-value')
+
+      const profile = await envManager.getProfile('test-profile')
+      expect(profile?.variables.DATABASE_URL).toBe('final-value')
+      expect(profile?.variables.API_KEY).toBe('secret123')
+    })
+
+    it('should handle multiple duplicate keys correctly', async () => {
+      // Simulate adding variables with multiple different keys being duplicated
+      await envManager.addVariable('test-profile', 'KEY1', 'value1-first')
+      await envManager.addVariable('test-profile', 'KEY2', 'value2-first')
+      await envManager.addVariable('test-profile', 'KEY3', 'value3-only')
+      await envManager.addVariable('test-profile', 'KEY1', 'value1-second')
+      await envManager.addVariable('test-profile', 'KEY2', 'value2-second')
+      await envManager.addVariable('test-profile', 'KEY1', 'value1-final')
+
+      const profile = await envManager.getProfile('test-profile')
+      expect(profile?.variables.KEY1).toBe('value1-final')
+      expect(profile?.variables.KEY2).toBe('value2-second')
+      expect(profile?.variables.KEY3).toBe('value3-only')
+    })
+
     it('should throw error if profile does not exist', async () => {
       await expect(envManager.addVariable('nonexistent', 'TEST_VAR', 'test-value')).rejects.toThrow(
         "Profile 'nonexistent' does not exist",
@@ -830,6 +879,54 @@ export EDITOR=vim`
 
       expect(result.removed.length).toBeGreaterThan(0)
       expect(result.removed.some((item) => item.includes(tempDir))).toBe(true)
+    })
+  })
+
+  describe('getShellRcFile', () => {
+    it('should detect zsh shell correctly', () => {
+      const manager = envManager
+      // Access private method using bracket notation for testing
+      const rcFile = (
+        manager as unknown as { getShellRcFile: (homeDir: string, shell: string) => string }
+      ).getShellRcFile('/home/user', '/usr/bin/zsh')
+
+      expect(rcFile).toBe('/home/user/.zshrc')
+    })
+
+    it('should detect bash shell correctly', () => {
+      const manager = envManager
+      const rcFile = (
+        manager as unknown as { getShellRcFile: (homeDir: string, shell: string) => string }
+      ).getShellRcFile('/home/user', '/bin/bash')
+
+      expect(rcFile).toBe('/home/user/.bashrc')
+    })
+
+    it('should detect fish shell correctly', () => {
+      const manager = envManager
+      const rcFile = (
+        manager as unknown as { getShellRcFile: (homeDir: string, shell: string) => string }
+      ).getShellRcFile('/home/user', '/usr/bin/fish')
+
+      expect(rcFile).toBe('/home/user/.config/fish/config.fish')
+    })
+
+    it('should default to bashrc for unknown shells', () => {
+      const manager = envManager
+      const rcFile = (
+        manager as unknown as { getShellRcFile: (homeDir: string, shell: string) => string }
+      ).getShellRcFile('/home/user', '/usr/bin/unknown-shell')
+
+      expect(rcFile).toBe('/home/user/.bashrc')
+    })
+
+    it('should default to bashrc when shell is empty', () => {
+      const manager = envManager
+      const rcFile = (
+        manager as unknown as { getShellRcFile: (homeDir: string, shell: string) => string }
+      ).getShellRcFile('/home/user', '')
+
+      expect(rcFile).toBe('/home/user/.bashrc')
     })
   })
 })

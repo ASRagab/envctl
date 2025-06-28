@@ -90,7 +90,7 @@ fi
 echo -e "${YELLOW}Validating user installation simulation...${NC}"
 # Check that we're using the globally installed version, not local dev version
 ENVCTL_PATH=$(which envctl)
-if [[ "$ENVCTL_PATH" == "/usr/local/bin/envctl" ]]; then
+if [[ $ENVCTL_PATH == "/usr/local/bin/envctl" ]]; then
   print_test "Global installation path" "PASS" "Using globally installed envctl"
 else
   print_test "Global installation path" "FAIL" "envctl path: $ENVCTL_PATH"
@@ -161,6 +161,77 @@ for var in "${test_vars[@]}"; do
     print_test "Add variable: $profile ($keyvalue)" "FAIL"
   fi
 done
+
+# Test multiple key-value pairs at once
+echo -e "${YELLOW}Testing multiple key-value pairs addition...${NC}"
+
+# Test adding multiple variables to a new profile
+if run_cmd "envctl create multi-test" >/dev/null 2>&1; then
+  # Add multiple variables in a single command
+  if run_cmd "envctl add multi-test VAR1=value1 VAR2=value2 VAR3=value3" >/dev/null 2>&1; then
+    print_test "Add multiple variables at once" "PASS"
+
+    # Verify all variables were added
+    list_output=$(run_cmd "envctl list multi-test")
+    if echo "$list_output" | grep -q "VAR1=value1" && echo "$list_output" | grep -q "VAR2=value2" && echo "$list_output" | grep -q "VAR3=value3"; then
+      print_test "Multiple variables verification" "PASS" "All variables added correctly"
+    else
+      print_test "Multiple variables verification" "FAIL" "Not all variables were added"
+    fi
+  else
+    print_test "Add multiple variables at once" "FAIL"
+  fi
+
+  # Test with special characters in multiple variables
+  if run_cmd "envctl add multi-test 'URL=https://api.example.com/v1' 'CONFIG=key=value&flag=true' 'PATH=/usr/local/bin:/usr/bin'" >/dev/null 2>&1; then
+    print_test "Multiple variables with special chars" "PASS"
+  else
+    print_test "Multiple variables with special chars" "FAIL"
+  fi
+
+  # Test mixed single and multiple additions work together
+  if run_cmd "envctl add multi-test SINGLE_VAR=single_value" >/dev/null 2>&1; then
+    if run_cmd "envctl add multi-test BATCH1=batch1 BATCH2=batch2" >/dev/null 2>&1; then
+      print_test "Mixed single and multiple additions" "PASS"
+    else
+      print_test "Mixed single and multiple additions" "FAIL"
+    fi
+  else
+    print_test "Mixed single and multiple additions" "FAIL"
+  fi
+
+  # Test duplicate key handling
+  if run_cmd "envctl add multi-test DUP_KEY=first_value DUP_KEY=second_value DUP_KEY=final_value" >/dev/null 2>&1; then
+    print_test "Duplicate key handling" "PASS"
+
+    # Verify the last value was used
+    list_output=$(run_cmd "envctl list multi-test")
+    if echo "$list_output" | grep -q "DUP_KEY=final_value"; then
+      print_test "Duplicate key last value verification" "PASS" "Last value correctly used"
+    else
+      print_test "Duplicate key last value verification" "FAIL" "Expected final_value"
+    fi
+  else
+    print_test "Duplicate key handling" "FAIL"
+  fi
+
+  # Test multiple different duplicate keys
+  if run_cmd "envctl add multi-test KEY_A=first KEY_B=first KEY_A=second KEY_C=only KEY_B=final" >/dev/null 2>&1; then
+    print_test "Multiple duplicate keys handling" "PASS"
+
+    # Verify all final values are correct
+    list_output=$(run_cmd "envctl list multi-test")
+    if echo "$list_output" | grep -q "KEY_A=second" && echo "$list_output" | grep -q "KEY_B=final" && echo "$list_output" | grep -q "KEY_C=only"; then
+      print_test "Multiple duplicate keys verification" "PASS" "All final values correct"
+    else
+      print_test "Multiple duplicate keys verification" "FAIL" "Values don't match expected"
+    fi
+  else
+    print_test "Multiple duplicate keys handling" "FAIL"
+  fi
+else
+  print_test "Create multi-test profile" "FAIL"
+fi
 
 # Test 5: File-based variable addition
 echo -e "${YELLOW}Testing file-based variable addition...${NC}"
@@ -369,8 +440,9 @@ echo -e "${YELLOW}Testing profile deletion...${NC}"
 # First ensure no profile is loaded
 envctl-unload >/dev/null 2>&1 || true
 
-# Test deleting profiles
-for profile in "${profiles_to_test[@]}"; do
+# Test deleting profiles (including multi-test profile)
+all_profiles=("${profiles_to_test[@]}" "multi-test")
+for profile in "${all_profiles[@]}"; do
   if run_cmd "envctl delete $profile" >/dev/null 2>&1; then
     print_test "Delete profile: $profile" "PASS"
   else
