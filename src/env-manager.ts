@@ -25,6 +25,22 @@ export class EnvManager {
     }
   }
 
+  private getShellRcFile = (homeDir: string, shell: string): string => {
+    // Extract shell name from path (e.g., '/usr/bin/zsh' -> 'zsh')
+    const shellName = shell.split('/').pop() || ''
+
+    switch (shellName) {
+      case 'zsh':
+        return this.deps.path.join(homeDir, '.zshrc')
+      case 'bash':
+        return this.deps.path.join(homeDir, '.bashrc')
+      case 'fish':
+        return this.deps.path.join(homeDir, '.config', 'fish', 'config.fish')
+      default:
+        return this.deps.path.join(homeDir, '.bashrc')
+    }
+  }
+
   createProfile = async (name: string): Promise<void> => {
     const existing = await this.storage.loadProfile(name)
     if (existing) {
@@ -329,18 +345,7 @@ export class EnvManager {
   setupShellIntegration = async (): Promise<{ rcFile: string; integrationFile: string }> => {
     const homeDir = this.deps.os.homedir()
     const shell = process.env['SHELL'] || ''
-
-    let rcFile: string
-    if (shell.includes('zsh')) {
-      rcFile = this.deps.path.join(homeDir, '.zshrc')
-    } else if (shell.includes('bash')) {
-      rcFile = this.deps.path.join(homeDir, '.bashrc')
-    } else if (shell.includes('fish')) {
-      rcFile = this.deps.path.join(homeDir, '.config', 'fish', 'config.fish')
-    } else {
-      rcFile = this.deps.path.join(homeDir, '.bashrc')
-    }
-
+    const rcFile = this.getShellRcFile(homeDir, shell)
     const integrationFile = this.deps.path.join(homeDir, '.envctl-integration.sh')
     const scriptPath = this.deps.path.join(__dirname, '..', 'shell-integration.sh')
 
@@ -435,18 +440,7 @@ alias ecsw='envctl-switch'
   unsetupShellIntegration = async (): Promise<{ rcFile: string; integrationFile: string; removed: string[] }> => {
     const homeDir = this.deps.os.homedir()
     const shell = process.env['SHELL'] || ''
-
-    let rcFile: string
-    if (shell.includes('zsh')) {
-      rcFile = this.deps.path.join(homeDir, '.zshrc')
-    } else if (shell.includes('bash')) {
-      rcFile = this.deps.path.join(homeDir, '.bashrc')
-    } else if (shell.includes('fish')) {
-      rcFile = this.deps.path.join(homeDir, '.config', 'fish', 'config.fish')
-    } else {
-      rcFile = this.deps.path.join(homeDir, '.bashrc')
-    }
-
+    const rcFile = this.getShellRcFile(homeDir, shell)
     const integrationFile = this.deps.path.join(homeDir, '.envctl-integration.sh')
     const removed: string[] = []
 

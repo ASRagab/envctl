@@ -76,13 +76,13 @@ git clone <your-repo>
 cd envctl
 
 # Install dependencies
-npm install
+pnpm install
 
 # Build the project
-npm run build
+pnpm run build
 
 # Link globally for local testing
-npm link
+pnpm link --global
 
 # Now you can use envctl globally
 envctl --help
@@ -104,9 +104,7 @@ source ~/.bashrc  # or ~/.zshrc
 envctl create dev
 
 # Add some environment variables
-envctl add dev DATABASE_URL=postgresql://localhost/mydb
-envctl add dev API_KEY=secret123
-envctl add dev NODE_ENV=development
+envctl add dev DATABASE_URL=postgresql://localhost/mydb API_KEY=secret123 NODE_ENV=development
 
 # Or add from a .env file
 envctl add dev -f .env
@@ -150,13 +148,23 @@ envctl create staging
 envctl create dev
 ```
 
-### `envctl add <profile> <KEY=VALUE>`
+### `envctl add <profile> <KEY=VALUE> [KEY=VALUE...]`
 
-Add or update an environment variable in a profile.
+Add or update environment variable(s) in a profile. You can add multiple variables at once.
 
 ```bash
+# Add a single variable
 envctl add dev DATABASE_URL=postgresql://localhost/mydb
-envctl add dev API_PORT=3000
+
+# Add multiple variables at once
+envctl add dev DATABASE_URL=postgresql://localhost/mydb API_PORT=3000 NODE_ENV=development
+
+# Mix and match - add as many as you need
+envctl add production DATABASE_URL=postgresql://prod-host/db API_KEY=prod-secret DEBUG=false
+
+# Duplicate keys are handled intelligently - last value wins
+envctl add dev DATABASE_URL=first_value DATABASE_URL=final_value API_KEY=secret
+# Result: DATABASE_URL=final_value, API_KEY=secret (with warning about duplicate)
 ```
 
 ### `envctl add <profile> -f <file>`
@@ -179,6 +187,23 @@ NODE_ENV=development
 # Empty lines are ignored
 DEBUG=true
 ```
+
+**Duplicate Key Handling:**
+
+When adding multiple variables, if you provide the same key more than once, envctl will use the last value and warn you about the duplication:
+
+```bash
+# This command has duplicate DATABASE_URL keys
+envctl add dev DATABASE_URL=first API_KEY=secret DATABASE_URL=final
+
+# Output:
+# ✓ Added 2 variables (DATABASE_URL, API_KEY) to profile 'dev'
+# ⚠ Duplicate keys detected: DATABASE_URL (used last value for each)
+
+# Result: DATABASE_URL=final, API_KEY=secret
+```
+
+This behavior ensures you always get predictable results while being informed about potential mistakes.
 
 ### `envctl remove <profile> <key>`
 
@@ -394,24 +419,29 @@ cd ../beta && npm start
 
 ## Development
 
+This project uses **pnpm** (version 10.0.0 or higher) as the package manager and requires **Node.js 18+**. Make sure you have both installed:
+
 ```bash
+# Install pnpm globally if you haven't already
+npm install -g pnpm@latest
+
 # Install dependencies
-npm install
+pnpm install
 
 # Run in development mode
-npm run dev
+pnpm run dev
 
 # Build
-npm run build
+pnpm run build
 
 # Run tests
-npm test
+pnpm test
 
 # Run smoke tests (comprehensive integration tests)
-npm run smoke-test
+pnpm run smoke-test
 
 # Test user installation experience (important for catching dependency issues)
-npm run test:user-install
+pnpm run test:user-install
 ```
 
 ### Smoke Testing
@@ -422,13 +452,13 @@ Quick smoke test commands:
 
 ```bash
 # Run full smoke test suite
-npm run smoke-test
+pnpm run smoke-test
 
 # Debug mode for interactive testing
-npm run smoke-test:debug
+pnpm run smoke-test:debug
 
 # Using Docker Compose
-npm run smoke-test:compose
+pnpm run smoke-test:compose
 ```
 
 ## Contributing
