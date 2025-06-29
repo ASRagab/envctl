@@ -1,3 +1,9 @@
+# [1.4.0](https://github.com/ASRagab/envctl/compare/v1.3.0...v1.4.0) (2025-06-29)
+
+### Features
+
+- **core:** refactoring sessions ([#11](https://github.com/ASRagab/envctl/issues/11)) ([3e33c77](https://github.com/ASRagab/envctl/commit/3e33c7793dca0213842c06d0deb221102db18c1d))
+
 # [1.3.0](https://github.com/ASRagab/envctl/compare/v1.2.0...v1.3.0) (2025-06-29)
 
 ### Features
