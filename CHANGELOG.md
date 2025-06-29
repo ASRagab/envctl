@@ -1,3 +1,9 @@
+# [1.3.0](https://github.com/ASRagab/envctl/compare/v1.2.0...v1.3.0) (2025-06-29)
+
+### Features
+
+- new major version ([64f5151](https://github.com/ASRagab/envctl/commit/64f5151c1d328d4549620e3ab1abee11e1387213))
+
 # [1.2.0](https://github.com/ASRagab/envctl/compare/v1.1.1...v1.2.0) (2025-06-28)
 
 ### Features
