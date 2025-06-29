@@ -72,8 +72,26 @@ run_cmd() {
   return $exit_code
 }
 
+# Function to test direct shell command output (new for streamlined behavior)
+test_shell_commands() {
+  local profile="$1"
+  local test_name="$2"
+
+  # Test that load command outputs shell commands
+  local load_output
+  load_output=$(envctl load "$profile" 2>/dev/null)
+  if echo "$load_output" | grep -q "export.*="; then
+    print_test "$test_name: shell command output" "PASS" "Load command outputs shell commands"
+    return 0
+  else
+    print_test "$test_name: shell command output" "FAIL" "Load command should output shell commands"
+    return 1
+  fi
+}
+
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}  envctl Comprehensive Smoke Tests${NC}"
+echo -e "${BLUE}   (Updated for Streamlined Behavior)${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo
 
@@ -101,6 +119,24 @@ if [ ! -d "/app/node_modules" ] && [ ! -d "/app/dist" ] && [ ! -d "/app/src" ]; 
   print_test "Development cleanup" "PASS" "Development files properly cleaned up"
 else
   print_test "Development cleanup" "FAIL" "Development files still present"
+fi
+
+# Test 1.7: Test new streamlined behavior - direct command output
+echo -e "${YELLOW}Testing streamlined shell command behavior...${NC}"
+# Create a test profile first
+if run_cmd "envctl create streamline-test" >/dev/null 2>&1 && run_cmd "envctl add streamline-test TEST_VAR=test_value" >/dev/null 2>&1; then
+  # Test that commands always output shell commands (no --shell flag needed)
+  load_output=$(envctl load streamline-test 2>/dev/null || true)
+  if echo "$load_output" | grep -q "export TEST_VAR=" && echo "$load_output" | grep -q "backup.env"; then
+    print_test "Streamlined load behavior" "PASS" "Load command always outputs shell commands"
+  else
+    print_test "Streamlined load behavior" "FAIL" "Load should output shell commands without --shell flag"
+  fi
+
+  # Clean up the test profile
+  run_cmd "envctl delete streamline-test" >/dev/null 2>&1 || true
+else
+  print_test "Streamlined test setup" "FAIL" "Could not create test profile"
 fi
 
 # Test 2: Shell integration setup
@@ -319,6 +355,54 @@ else
   print_test "Profile status reporting" "FAIL" "Status output: $status_output"
 fi
 
+# Test 8.5: Profile reload behavior (new streamlined feature)
+echo -e "${YELLOW}Testing profile reload behavior...${NC}"
+if type envctl-load >/dev/null 2>&1; then
+  # Try loading the same profile again (should work - reload)
+  if envctl-load dev >/dev/null 2>&1; then
+    print_test "Profile reload via shell function" "PASS" "Can reload same profile"
+
+    # Verify environment is still correct after reload
+    if check_var "DATABASE_URL" "postgresql://localhost/dev_db"; then
+      print_test "Reload preserves environment" "PASS" "Environment preserved after reload"
+    else
+      print_test "Reload preserves environment" "FAIL" "Environment changed after reload"
+    fi
+  else
+    print_test "Profile reload via shell function" "FAIL" "Should allow reloading same profile"
+  fi
+
+  # Test direct command reload behavior
+  load_output=$(envctl load dev 2>/dev/null || true)
+  if echo "$load_output" | grep -q "export.*=" && [ $? -eq 0 ]; then
+    print_test "Profile reload via direct command" "PASS" "Direct reload command works"
+  else
+    print_test "Profile reload via direct command" "FAIL" "Direct reload should work"
+  fi
+else
+  print_test "Shell function availability for reload test" "FAIL" "envctl-load function not available"
+fi
+
+# Test 8.7: Stateless backup file validation (new architecture)
+echo -e "${YELLOW}Testing stateless backup file approach...${NC}"
+# Check that backup file exists and contains profile marker
+if [ -f ~/.envctl/backup.env ]; then
+  if grep -q "# envctl-profile:dev" ~/.envctl/backup.env; then
+    print_test "Backup file profile marker" "PASS" "Backup file contains correct profile marker"
+  else
+    print_test "Backup file profile marker" "FAIL" "Backup file missing profile marker"
+  fi
+
+  # Check that backup file contains actual variable backups
+  if grep -q "=" ~/.envctl/backup.env; then
+    print_test "Backup file contains variables" "PASS" "Backup file stores original variables"
+  else
+    print_test "Backup file contains variables" "FAIL" "Backup file should contain variable backups"
+  fi
+else
+  print_test "Backup file exists" "FAIL" "Backup file should exist when profile is loaded"
+fi
+
 # Test 9: Profile switching
 echo -e "${YELLOW}Testing profile switching...${NC}"
 if type envctl-switch >/dev/null 2>&1; then
@@ -388,6 +472,13 @@ if type envctl-unload >/dev/null 2>&1; then
       print_test "Environment restoration" "FAIL" "DATABASE_URL: expected 'will_be_overridden', got '${DATABASE_URL}'"
     fi
 
+    # Verify backup file is removed (stateless cleanup)
+    if [ ! -f ~/.envctl/backup.env ]; then
+      print_test "Backup file cleanup" "PASS" "Backup file removed after unload"
+    else
+      print_test "Backup file cleanup" "FAIL" "Backup file should be removed after unload"
+    fi
+
   else
     print_test "Profile unloading" "FAIL"
   fi
@@ -396,11 +487,18 @@ fi
 # Test 13: Error handling
 echo -e "${YELLOW}Testing error handling...${NC}"
 
-# Test loading non-existent profile
+# Test loading non-existent profile via shell function
 if ! run_cmd "envctl-load nonexistent" >/dev/null 2>&1; then
-  print_test "Error handling: non-existent profile" "PASS" "Correctly fails on non-existent profile"
+  print_test "Error handling: non-existent profile (shell function)" "PASS" "Correctly fails on non-existent profile"
 else
-  print_test "Error handling: non-existent profile" "FAIL" "Should fail on non-existent profile"
+  print_test "Error handling: non-existent profile (shell function)" "FAIL" "Should fail on non-existent profile"
+fi
+
+# Test loading non-existent profile via direct command (should also fail)
+if ! run_cmd "envctl load nonexistent" >/dev/null 2>&1; then
+  print_test "Error handling: non-existent profile (direct)" "PASS" "Direct command correctly fails on non-existent profile"
+else
+  print_test "Error handling: non-existent profile (direct)" "FAIL" "Direct command should fail on non-existent profile"
 fi
 
 # Test creating duplicate profile

@@ -1,6 +1,6 @@
 import fs from 'fs-extra'
 import path from 'path'
-import { Profile, EnvState, Config } from './types'
+import { Profile, Config } from './types'
 import { getConfig } from './config'
 
 export class Storage {
@@ -55,25 +55,26 @@ export class Storage {
     return files.filter((file) => file.endsWith('.json')).map((file) => path.basename(file, '.json'))
   }
 
-  saveState = async (state: EnvState): Promise<void> => {
-    await this.ensureDirectories()
-    await fs.writeJson(this.config.stateFile, state, { spaces: 2 })
-  }
-
-  loadState = async (): Promise<EnvState> => {
-    await this.ensureDirectories()
-    if (!(await fs.pathExists(this.config.stateFile))) {
-      return {}
+  getCurrentlyLoadedProfile = async (): Promise<string | null> => {
+    if (!(await fs.pathExists(this.backupFilePath))) {
+      return null
     }
 
-    return await fs.readJson(this.config.stateFile)
+    const content = await fs.readFile(this.backupFilePath, 'utf-8')
+    const lines = content.split('\n')
+
+    const firstLine = lines[0]?.trim()
+    if (firstLine?.startsWith('# envctl-profile:')) {
+      return firstLine.replace('# envctl-profile:', '').trim()
+    }
+
+    return 'unknown'
   }
 
   saveBackup = async (variables: Record<string, string>): Promise<void> => {
     await this.ensureDirectories()
 
     if (Object.keys(variables).length === 0) {
-      // If no variables to backup, ensure backup file doesn't exist
       if (await fs.pathExists(this.backupFilePath)) {
         await fs.remove(this.backupFilePath)
       }
@@ -111,6 +112,10 @@ export class Storage {
 
     for (const line of content.split('\n')) {
       const trimmedLine = line.trim()
+
+      if (trimmedLine.startsWith('# envctl-profile:')) {
+        continue
+      }
 
       if (!trimmedLine || trimmedLine.startsWith('#')) {
         continue

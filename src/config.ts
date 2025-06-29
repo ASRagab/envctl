@@ -7,6 +7,5 @@ export const getConfig = (): Config => {
   return {
     configDir,
     profilesDir: path.join(configDir, 'profiles'),
-    stateFile: path.join(configDir, 'state.json'),
   }
 }

@@ -109,57 +109,28 @@ program
 
 program
   .command('load')
-  .description('Load profile into current session')
+  .description('Load profile into current session (reloads if same profile already loaded)')
   .argument('<profile>', 'Profile name')
-  .option('--shell', 'Output shell commands to source')
-  .action(async (profile: string, options?: { shell?: boolean }) => {
+  .action(async (profile: string) => {
     try {
-      if (options?.shell) {
-        const commands = await envManager.generateShellCommands(profile)
-        console.log(commands)
-      } else {
-        await envManager.loadProfile(profile)
-        success(`Loaded profile '${profile}'`)
-        warn('Note: Environment variables are only set within this CLI process.')
-        info(`For shell integration, use: eval "$(envctl load --shell ${profile})"`)
-        info("Or run 'envctl unload' to restore previous environment")
-      }
+      const commands = await envManager.loadProfile(profile)
+      console.log(commands)
     } catch (err) {
-      if (options?.shell) {
-        // In shell mode, output error to stderr so it doesn't interfere with eval
-        console.error(`Error: ${(err as Error).message}`)
-        process.exit(1)
-      } else {
-        error((err as Error).message)
-        process.exit(1)
-      }
+      console.error(`Error: ${(err as Error).message}`)
+      process.exit(1)
     }
   })
 
 program
   .command('unload')
   .description('Unload current profile')
-  .option('--shell', 'Output shell commands to source')
-  .action(async (options?: { shell?: boolean }) => {
+  .action(async () => {
     try {
-      if (options?.shell) {
-        const result = await envManager.generateUnloadCommands()
-        console.log(result.commands)
-      } else {
-        const profileName = await envManager.unloadProfile()
-        success(`Unloaded profile '${profileName}'`)
-        warn('Note: Environment variables are only unset within this CLI process.')
-        info('For shell integration, use: eval "$(envctl unload --shell)"')
-      }
+      const result = await envManager.unloadProfile()
+      console.log(result.commands)
     } catch (err) {
-      if (options?.shell) {
-        // In shell mode, output error to stderr so it doesn't interfere with eval
-        console.error(`Error: ${(err as Error).message}`)
-        process.exit(1)
-      } else {
-        error((err as Error).message)
-        process.exit(1)
-      }
+      console.error(`Error: ${(err as Error).message}`)
+      process.exit(1)
     }
   })
 
@@ -167,32 +138,13 @@ program
   .command('switch')
   .description('Switch to a different profile (unload current + load new)')
   .argument('<profile>', 'Profile name to switch to')
-  .option('--shell', 'Output shell commands to source')
-  .action(async (profile: string, options?: { shell?: boolean }) => {
+  .action(async (profile: string) => {
     try {
-      if (options?.shell) {
-        const result = await envManager.generateSwitchCommands(profile)
-        console.log(result.commands)
-      } else {
-        const result = await envManager.switchProfile(profile)
-        if (result.from) {
-          success(`Switched from '${result.from}' to '${result.to}'`)
-        } else {
-          success(`Loaded profile '${result.to}'`)
-        }
-        warn('Note: Environment variables are only changed within this CLI process.')
-        info(`For shell integration, use: eval "$(envctl switch --shell ${profile})"`)
-        info(`Or use the convenience function: envctl-switch ${profile} (after running envctl setup)`)
-      }
+      const result = await envManager.switchProfile(profile)
+      console.log(result.commands)
     } catch (err) {
-      if (options?.shell) {
-        // In shell mode, output error to stderr so it doesn't interfere with eval
-        console.error(`Error: ${(err as Error).message}`)
-        process.exit(1)
-      } else {
-        error((err as Error).message)
-        process.exit(1)
-      }
+      console.error(`Error: ${(err as Error).message}`)
+      process.exit(1)
     }
   })
 
@@ -312,7 +264,6 @@ program
   .action(async (options?: { all?: boolean; force?: boolean }) => {
     try {
       if (options?.all) {
-        // Show warning
         console.log(chalk.yellow('⚠ WARNING: This will remove ALL envctl data including:'))
         console.log('  - All profiles and their environment variables')
         console.log('  - Shell integration functions')
@@ -391,10 +342,8 @@ program
     }
   })
 
-// Parse command line arguments
 program.parse()
 
-// If no command provided, show help
 if (!process.argv.slice(2).length) {
   program.outputHelp()
 }

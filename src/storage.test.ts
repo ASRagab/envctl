@@ -1,5 +1,5 @@
 import { Storage } from './storage'
-import { Profile, EnvState } from './types'
+import { Profile } from './types'
 import fs from 'fs-extra'
 import path from 'path'
 import os from 'os'
@@ -16,7 +16,7 @@ describe('Storage', () => {
       getConfig: () => ({
         configDir: tempDir,
         profilesDir: path.join(tempDir, 'profiles'),
-        stateFile: path.join(tempDir, 'state.json'),
+        // Removed stateFile from mock config
       }),
     }))
 
@@ -148,28 +148,55 @@ describe('Storage', () => {
     })
   })
 
-  describe('saveState and loadState', () => {
-    it('should save and load state correctly', async () => {
-      const testState: EnvState = {
-        currentProfile: 'test-profile',
-      }
-
-      await storage.saveState(testState)
-
-      const loaded = await storage.loadState()
-      expect(loaded).toEqual(testState)
+  describe('getCurrentlyLoadedProfile', () => {
+    it('should return null when no backup file exists', async () => {
+      const profile = await storage.getCurrentlyLoadedProfile()
+      expect(profile).toBeNull()
     })
 
-    it('should return empty state when no state file exists', async () => {
-      const loaded = await storage.loadState()
-      expect(loaded).toEqual({})
+    it('should return profile name from backup file marker', async () => {
+      const backupFilePath = path.join(tempDir, 'backup.env')
+      const backupContent = `# envctl-profile:dev
+DATABASE_URL=postgresql://localhost/test
+API_KEY=secret123`
+
+      await fs.ensureDir(tempDir)
+      await fs.writeFile(backupFilePath, backupContent)
+
+      const profile = await storage.getCurrentlyLoadedProfile()
+      expect(profile).toBe('dev')
     })
 
-    it('should handle empty state', async () => {
-      await storage.saveState({})
+    it('should return "unknown" for backup file without marker', async () => {
+      const backupFilePath = path.join(tempDir, 'backup.env')
+      const backupContent = `DATABASE_URL=postgresql://localhost/test
+API_KEY=secret123`
 
-      const loaded = await storage.loadState()
-      expect(loaded).toEqual({})
+      await fs.ensureDir(tempDir)
+      await fs.writeFile(backupFilePath, backupContent)
+
+      const profile = await storage.getCurrentlyLoadedProfile()
+      expect(profile).toBe('unknown')
+    })
+
+    it('should handle empty backup file', async () => {
+      const backupFilePath = path.join(tempDir, 'backup.env')
+      await fs.ensureDir(tempDir)
+      await fs.writeFile(backupFilePath, '')
+
+      const profile = await storage.getCurrentlyLoadedProfile()
+      expect(profile).toBe('unknown')
+    })
+
+    it('should handle backup file with only marker', async () => {
+      const backupFilePath = path.join(tempDir, 'backup.env')
+      const backupContent = `# envctl-profile:production`
+
+      await fs.ensureDir(tempDir)
+      await fs.writeFile(backupFilePath, backupContent)
+
+      const profile = await storage.getCurrentlyLoadedProfile()
+      expect(profile).toBe('production')
     })
   })
 
@@ -218,6 +245,26 @@ describe('Storage', () => {
 
       const loaded = await storage.loadBackup()
       expect(loaded).toEqual(backupData)
+    })
+
+    it('should ignore profile marker when parsing backup variables', async () => {
+      // Manually create backup file with profile marker
+      const backupFilePath = path.join(tempDir, 'backup.env')
+      const backupContent = `# envctl-profile:dev
+DATABASE_URL=postgresql://localhost/test
+API_KEY=secret123`
+
+      await fs.ensureDir(tempDir)
+      await fs.writeFile(backupFilePath, backupContent)
+
+      // loadBackup should ignore the profile marker line
+      const loaded = await storage.loadBackup()
+      expect(loaded).toEqual({
+        DATABASE_URL: 'postgresql://localhost/test',
+        API_KEY: 'secret123',
+      })
+      // Should not include the profile marker as a variable
+      expect(loaded['# envctl-profile']).toBeUndefined()
     })
   })
 
@@ -328,6 +375,20 @@ FINAL_VALID=final`
 
       const variables = await storage.parseEnvFile(envFilePath)
       expect(variables).toEqual({})
+    })
+
+    it('should ignore profile marker in env files', async () => {
+      const content = `# envctl-profile:some-profile
+DATABASE_URL=postgresql://localhost/test
+API_KEY=secret123`
+
+      await fs.writeFile(envFilePath, content)
+
+      const variables = await storage.parseEnvFile(envFilePath)
+      expect(variables).toEqual({
+        DATABASE_URL: 'postgresql://localhost/test',
+        API_KEY: 'secret123',
+      })
     })
 
     it('should throw error for non-existent file', async () => {

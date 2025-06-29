@@ -4,7 +4,6 @@ import os from 'os'
 import path from 'path'
 import fs from 'fs-extra'
 
-// Interface for testable dependencies
 interface Dependencies {
   os: typeof os
   path: typeof path
@@ -100,105 +99,188 @@ export class EnvManager {
     await this.storage.saveProfile(profile)
   }
 
-  loadProfile = async (profileName: string): Promise<void> => {
+  loadProfile = async (profileName: string): Promise<string> => {
     const profile = await this.storage.loadProfile(profileName)
     if (!profile) {
       throw new Error(`Profile '${profileName}' does not exist`)
     }
 
-    const state = await this.storage.loadState()
-    if (state.currentProfile) {
-      throw new Error(`Profile '${state.currentProfile}' is already loaded. Unload it first.`)
+    const currentlyLoaded = await this.storage.getCurrentlyLoadedProfile()
+
+    if (currentlyLoaded === profileName) {
+      return await this.reloadCurrentProfile(profileName, profile)
     }
 
-    // Backup current environment - only variables that actually exist
-    const backup: Record<string, string> = {}
-    for (const key of Object.keys(profile.variables)) {
-      if (process.env[key] !== undefined) {
-        backup[key] = process.env[key]!
-      }
+    if (currentlyLoaded && currentlyLoaded !== profileName) {
+      throw new Error(
+        `Profile '${currentlyLoaded}' is already loaded. Use 'envctl switch ${profileName}' to switch profiles.`,
+      )
     }
 
-    await this.storage.saveBackup(backup)
-
-    for (const [key, value] of Object.entries(profile.variables)) {
-      process.env[key] = value
-    }
-
-    // Save state (no longer need to store backup in state)
-    await this.storage.saveState({
-      currentProfile: profileName,
-    })
+    return await this.generateLoadCommands(profileName, profile)
   }
 
-  unloadProfile = async (): Promise<string> => {
-    const state = await this.storage.loadState()
-    if (!state.currentProfile) {
+  private reloadCurrentProfile = async (profileName: string, profile: Profile): Promise<string> => {
+    const commands: string[] = []
+
+    // First, restore from backup (unload current state)
+    for (const key of Object.keys(profile.variables)) {
+      commands.push(`if grep -q "^${key}=" ~/.envctl/backup.env 2>/dev/null; then`)
+      commands.push(`  export ${key}="$(grep "^${key}=" ~/.envctl/backup.env | cut -d'=' -f2-)"`)
+      commands.push(`else`)
+      commands.push(`  unset ${key}`)
+      commands.push(`fi`)
+    }
+
+    // Then create fresh backup and load new values
+    commands.push(`echo "# envctl-profile:${profileName}" > ~/.envctl/backup.env`)
+
+    for (const key of Object.keys(profile.variables)) {
+      commands.push(`[ -n "\${${key}+x}" ] && echo "${key}=$${key}" >> ~/.envctl/backup.env`)
+    }
+
+    for (const [key, value] of Object.entries(profile.variables)) {
+      commands.push(`export ${key}="${value}"`)
+    }
+
+    return commands.join('\n')
+  }
+
+  private generateLoadCommands = async (profileName: string, profile: Profile): Promise<string> => {
+    const backupCommands: string[] = []
+    const setCommands: string[] = []
+
+    // Create backup file with profile marker
+    const createBackupCommand = `echo "# envctl-profile:${profileName}" > ~/.envctl/backup.env`
+
+    for (const key of Object.keys(profile.variables)) {
+      backupCommands.push(`[ -n "\${${key}+x}" ] && echo "${key}=$${key}" >> ~/.envctl/backup.env`)
+    }
+
+    for (const [key, value] of Object.entries(profile.variables)) {
+      setCommands.push(`export ${key}="${value}"`)
+    }
+
+    return [createBackupCommand, ...backupCommands, ...setCommands].join('\n')
+  }
+
+  unloadProfile = async (): Promise<{ commands: string; profileName: string }> => {
+    const currentlyLoaded = await this.storage.getCurrentlyLoadedProfile()
+    if (!currentlyLoaded) {
       throw new Error('No profile is currently loaded')
     }
 
-    const profileName = state.currentProfile
-    const profile = await this.storage.loadProfile(profileName)
-    if (!profile) {
-      throw new Error(`Profile '${profileName}' not found`)
+    // Handle unknown profile case
+    if (currentlyLoaded === 'unknown') {
+      const commands = `rm -f ~/.envctl/backup.env`
+      return { commands, profileName: 'unknown' }
     }
 
-    const backup = await this.storage.loadBackup()
+    const profile = await this.storage.loadProfile(currentlyLoaded)
+    if (!profile) {
+      throw new Error(`Profile '${currentlyLoaded}' not found`)
+    }
 
-    // Restore environment - smart restore logic
+    const commands: string[] = []
+
     for (const key of Object.keys(profile.variables)) {
-      if (key in backup) {
-        // Variable existed before - restore original value
-        process.env[key] = backup[key]
-      } else {
-        // Variable didn't exist before - remove it completely
-        delete process.env[key]
+      commands.push(`if grep -q "^${key}=" ~/.envctl/backup.env 2>/dev/null; then`)
+      commands.push(`  export ${key}="$(grep "^${key}=" ~/.envctl/backup.env | cut -d'=' -f2-)"`)
+      commands.push(`else`)
+      commands.push(`  unset ${key}`)
+      commands.push(`fi`)
+    }
+
+    commands.push('rm -f ~/.envctl/backup.env')
+
+    return {
+      commands: commands.join('\n'),
+      profileName: currentlyLoaded,
+    }
+  }
+
+  switchProfile = async (profileName: string): Promise<{ commands: string; from?: string; to: string }> => {
+    const newProfile = await this.storage.loadProfile(profileName)
+    if (!newProfile) {
+      throw new Error(`Profile '${profileName}' does not exist`)
+    }
+
+    const currentlyLoaded = await this.storage.getCurrentlyLoadedProfile()
+
+    if (!currentlyLoaded) {
+      // No profile loaded - just load the new one
+      const commands = await this.generateLoadCommands(profileName, newProfile)
+      return { commands, to: profileName }
+    }
+
+    if (currentlyLoaded === profileName) {
+      // Same profile - just reload it
+      const commands = await this.reloadCurrentProfile(profileName, newProfile)
+      return { commands, from: profileName, to: profileName }
+    }
+
+    // Different profile - unload current and load new
+    const commands: string[] = []
+
+    // Only try to unload if we know what profile is loaded
+    if (currentlyLoaded !== 'unknown') {
+      const currentProfile = await this.storage.loadProfile(currentlyLoaded)
+
+      if (currentProfile) {
+        // Unload current profile
+        for (const key of Object.keys(currentProfile.variables)) {
+          commands.push(`if grep -q "^${key}=" ~/.envctl/backup.env 2>/dev/null; then`)
+          commands.push(`  export ${key}="$(grep "^${key}=" ~/.envctl/backup.env | cut -d'=' -f2-)"`)
+          commands.push(`else`)
+          commands.push(`  unset ${key}`)
+          commands.push(`fi`)
+        }
       }
     }
 
-    await this.storage.clearBackup()
-    await this.storage.saveState({})
+    // Load new profile
+    commands.push(`echo "# envctl-profile:${profileName}" > ~/.envctl/backup.env`)
 
-    return profileName
-  }
-
-  switchProfile = async (profileName: string): Promise<{ from?: string; to: string }> => {
-    const state = await this.storage.loadState()
-    let fromProfile: string | undefined
-
-    if (state.currentProfile) {
-      fromProfile = await this.unloadProfile()
+    for (const key of Object.keys(newProfile.variables)) {
+      commands.push(`[ -n "\${${key}+x}" ] && echo "${key}=$${key}" >> ~/.envctl/backup.env`)
     }
 
-    await this.loadProfile(profileName)
+    for (const [key, value] of Object.entries(newProfile.variables)) {
+      commands.push(`export ${key}="${value}"`)
+    }
 
-    return fromProfile !== undefined ? { from: fromProfile, to: profileName } : { to: profileName }
+    return { commands: commands.join('\n'), from: currentlyLoaded, to: profileName }
   }
 
   getStatus = async (): Promise<{ currentProfile?: string; variableCount?: number }> => {
-    const state = await this.storage.loadState()
+    const currentlyLoaded = await this.storage.getCurrentlyLoadedProfile()
 
-    if (!state.currentProfile) {
+    if (!currentlyLoaded) {
       return {}
     }
 
-    const profile = await this.storage.loadProfile(state.currentProfile)
+    // Handle unknown profile (backup exists but no profile marker)
+    if (currentlyLoaded === 'unknown') {
+      return { currentProfile: 'unknown', variableCount: 0 }
+    }
+
+    const profile = await this.storage.loadProfile(currentlyLoaded)
     return {
-      currentProfile: state.currentProfile,
+      currentProfile: currentlyLoaded,
       variableCount: profile ? Object.keys(profile.variables).length : 0,
     }
   }
 
   listProfiles = async (): Promise<Array<{ name: string; isLoaded: boolean; variableCount: number }>> => {
     const profiles = await this.storage.listProfiles()
-    const state = await this.storage.loadState()
+    const currentlyLoaded = await this.storage.getCurrentlyLoadedProfile()
 
     const result = []
     for (const name of profiles) {
       const profile = await this.storage.loadProfile(name)
       result.push({
         name,
-        isLoaded: state.currentProfile === name,
+        isLoaded: currentlyLoaded === name,
         variableCount: profile ? Object.keys(profile.variables).length : 0,
       })
     }
@@ -211,8 +293,8 @@ export class EnvManager {
   }
 
   deleteProfile = async (name: string): Promise<void> => {
-    const state = await this.storage.loadState()
-    if (state.currentProfile === name) {
+    const currentlyLoaded = await this.storage.getCurrentlyLoadedProfile()
+    if (currentlyLoaded === name) {
       throw new Error(`Cannot delete profile '${name}' while it is loaded. Unload it first.`)
     }
 
@@ -231,115 +313,6 @@ export class EnvManager {
     return Object.entries(profile.variables)
       .map(([key, value]) => `${key}=${value}`)
       .join('\n')
-  }
-
-  generateShellCommands = async (profileName: string): Promise<string> => {
-    const profile = await this.storage.loadProfile(profileName)
-    if (!profile) {
-      throw new Error(`Profile '${profileName}' does not exist`)
-    }
-
-    const state = await this.storage.loadState()
-    if (state.currentProfile) {
-      throw new Error(`Profile '${state.currentProfile}' is already loaded. Unload it first.`)
-    }
-
-    // Generate backup commands for current environment - only if variables exist
-    const backupCommands: string[] = []
-    const setCommands: string[] = []
-
-    for (const key of Object.keys(profile.variables)) {
-      // Save current value only if it exists
-      backupCommands.push(`[ -n "\${${key}+x}" ] && echo "${key}=$${key}" >> ~/.envctl/backup.env`)
-    }
-
-    for (const [key, value] of Object.entries(profile.variables)) {
-      setCommands.push(`export ${key}="${value}"`)
-    }
-
-    await this.storage.saveState({
-      currentProfile: profileName,
-    })
-
-    return [...backupCommands, ...setCommands].join('\n')
-  }
-
-  generateUnloadCommands = async (): Promise<{ commands: string; profileName: string }> => {
-    const state = await this.storage.loadState()
-    if (!state.currentProfile) {
-      throw new Error('No profile is currently loaded')
-    }
-
-    const profile = await this.storage.loadProfile(state.currentProfile)
-    if (!profile) {
-      throw new Error(`Profile '${state.currentProfile}' not found`)
-    }
-
-    const commands: string[] = []
-
-    for (const key of Object.keys(profile.variables)) {
-      commands.push(`if grep -q "^${key}=" ~/.envctl/backup.env 2>/dev/null; then`)
-      commands.push(`  export ${key}="$(grep "^${key}=" ~/.envctl/backup.env | cut -d'=' -f2-)"`)
-      commands.push(`else`)
-      commands.push(`  unset ${key}`)
-      commands.push(`fi`)
-    }
-
-    commands.push('rm -f ~/.envctl/backup.env')
-
-    await this.storage.saveState({})
-
-    return {
-      commands: commands.join('\n'),
-      profileName: state.currentProfile,
-    }
-  }
-
-  generateSwitchCommands = async (profileName: string): Promise<{ commands: string; from?: string; to: string }> => {
-    const newProfile = await this.storage.loadProfile(profileName)
-    if (!newProfile) {
-      throw new Error(`Profile '${profileName}' does not exist`)
-    }
-
-    const state = await this.storage.loadState()
-    let fromProfile: string | undefined
-    const commands: string[] = []
-
-    if (state.currentProfile) {
-      fromProfile = state.currentProfile
-      const currentProfile = await this.storage.loadProfile(state.currentProfile)
-      if (!currentProfile) {
-        throw new Error(`Current profile '${state.currentProfile}' not found`)
-      }
-
-      for (const key of Object.keys(currentProfile.variables)) {
-        commands.push(`if grep -q "^${key}=" ~/.envctl/backup.env 2>/dev/null; then`)
-        commands.push(`  export ${key}="$(grep "^${key}=" ~/.envctl/backup.env | cut -d'=' -f2-)"`)
-        commands.push(`else`)
-        commands.push(`  unset ${key}`)
-        commands.push(`fi`)
-      }
-
-      commands.push('rm -f ~/.envctl/backup.env')
-    }
-
-    // Generate backup commands for new profile - only if variables exist
-    for (const key of Object.keys(newProfile.variables)) {
-      // Save current value only if it exists
-      commands.push(`[ -n "\${${key}+x}" ] && echo "${key}=$${key}" >> ~/.envctl/backup.env`)
-    }
-
-    for (const [key, value] of Object.entries(newProfile.variables)) {
-      commands.push(`export ${key}="${value}"`)
-    }
-
-    await this.storage.saveState({
-      currentProfile: profileName,
-    })
-
-    return fromProfile !== undefined
-      ? { commands: commands.join('\n'), from: fromProfile, to: profileName }
-      : { commands: commands.join('\n'), to: profileName }
   }
 
   setupShellIntegration = async (): Promise<{ rcFile: string; integrationFile: string }> => {
@@ -366,13 +339,13 @@ envctl-load() {
     fi
     
     local commands
-    commands=$(envctl load --shell "$1" 2>/dev/null)
+    commands=$(envctl load "$1" 2>/dev/null)
     if [ $? -eq 0 ]; then
         eval "$commands"
         echo "✓ Loaded profile '$1'"
     else
         echo "✗ Failed to load profile '$1'"
-        envctl load --shell "$1"  # Show the error
+        envctl load "$1"  # Show the error
         return 1
     fi
 }
@@ -380,13 +353,13 @@ envctl-load() {
 # Function to unload current profile
 envctl-unload() {
     local commands
-    commands=$(envctl unload --shell 2>/dev/null)
+    commands=$(envctl unload 2>/dev/null)
     if [ $? -eq 0 ]; then
         eval "$commands"
         echo "✓ Unloaded profile"
     else
         echo "✗ Failed to unload profile"
-        envctl unload --shell  # Show the error
+        envctl unload  # Show the error
         return 1
     fi
 }
@@ -399,13 +372,13 @@ envctl-switch() {
     fi
     
     local commands
-    commands=$(envctl switch --shell "$1" 2>/dev/null)
+    commands=$(envctl switch "$1" 2>/dev/null)
     if [ $? -eq 0 ]; then
         eval "$commands"
         echo "✓ Switched to profile '$1'"
     else
         echo "✗ Failed to switch to profile '$1'"
-        envctl switch --shell "$1"  # Show the error
+        envctl switch "$1"  # Show the error
         return 1
     fi
 }
@@ -475,12 +448,13 @@ alias ecsw='envctl-switch'
     const config = getConfig()
     const removed: string[] = []
 
-    // First unload any current profile
     try {
-      const state = await this.storage.loadState()
-      if (state.currentProfile) {
-        await this.unloadProfile()
-        removed.push('Unloaded current profile')
+      const currentlyLoaded = await this.storage.getCurrentlyLoadedProfile()
+      if (currentlyLoaded) {
+        const result = await this.unloadProfile()
+        // Execute the unload commands in our process (this is cleanup, so it's okay)
+        // Note: In a real cleanup scenario, we'd just remove the files directly
+        removed.push(`Unloaded current profile '${result.profileName}'`)
       }
     } catch {
       // Ignore errors - profile might not exist or be corrupted
