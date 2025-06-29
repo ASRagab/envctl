@@ -122,21 +122,22 @@ export class EnvManager {
 
   private reloadCurrentProfile = async (profileName: string, profile: Profile): Promise<string> => {
     const commands: string[] = []
+    const backupFile = this.getSessionBackupPath()
 
     // First, restore from backup (unload current state)
     for (const key of Object.keys(profile.variables)) {
-      commands.push(`if grep -q "^${key}=" ~/.envctl/backup.env 2>/dev/null; then`)
-      commands.push(`  export ${key}="$(grep "^${key}=" ~/.envctl/backup.env | cut -d'=' -f2-)"`)
+      commands.push(`if grep -q "^${key}=" ${backupFile} 2>/dev/null; then`)
+      commands.push(`  export ${key}="$(grep "^${key}=" ${backupFile} | cut -d'=' -f2-)"`)
       commands.push(`else`)
       commands.push(`  unset ${key}`)
       commands.push(`fi`)
     }
 
     // Then create fresh backup and load new values
-    commands.push(`echo "# envctl-profile:${profileName}" > ~/.envctl/backup.env`)
+    commands.push(`echo "# envctl-profile:${profileName}" > ${backupFile}`)
 
     for (const key of Object.keys(profile.variables)) {
-      commands.push(`[ -n "\${${key}+x}" ] && echo "${key}=$${key}" >> ~/.envctl/backup.env`)
+      commands.push(`[ -n "\${${key}+x}" ] && echo "${key}=$${key}" >> ${backupFile}`)
     }
 
     for (const [key, value] of Object.entries(profile.variables)) {
@@ -146,15 +147,24 @@ export class EnvManager {
     return commands.join('\n')
   }
 
+  private getSessionBackupPath = (): string => {
+    // Generate shell command to determine backup path using shell PID ($$) instead of PPID
+    // This ensures shell commands and Node.js CLI processes use the same session ID
+    // Node.js CLI's PPID = Shell's PID, so both will use the same identifier
+    // Include Docker/containerized environment fallback for consistent behavior
+    return '$(if [ -n "${TERM_PROGRAM}" ]; then echo "${HOME}/.envctl/backup-$$-${SHLVL:-1}-${TERM_PROGRAM}.env"; elif [ -n "${SSH_TTY}" ]; then echo "${HOME}/.envctl/backup-$$-${SHLVL:-1}-ssh.env"; elif [ -n "${TERM}" ]; then echo "${HOME}/.envctl/backup-$$-${SHLVL:-1}-$(echo ${TERM} | cut -d\'-\' -f1).env"; elif [ "${SHLVL:-1}" = "2" ]; then echo "${HOME}/.envctl/backup-$$-${SHLVL:-1}-dumb.env"; else echo "${HOME}/.envctl/backup-$$-${SHLVL:-1}.env"; fi)'
+  }
+
   private generateLoadCommands = async (profileName: string, profile: Profile): Promise<string> => {
     const backupCommands: string[] = []
     const setCommands: string[] = []
+    const backupFile = this.getSessionBackupPath()
 
     // Create backup file with profile marker
-    const createBackupCommand = `echo "# envctl-profile:${profileName}" > ~/.envctl/backup.env`
+    const createBackupCommand = `echo "# envctl-profile:${profileName}" > ${backupFile}`
 
     for (const key of Object.keys(profile.variables)) {
-      backupCommands.push(`[ -n "\${${key}+x}" ] && echo "${key}=$${key}" >> ~/.envctl/backup.env`)
+      backupCommands.push(`[ -n "\${${key}+x}" ] && echo "${key}=$${key}" >> ${backupFile}`)
     }
 
     for (const [key, value] of Object.entries(profile.variables)) {
@@ -170,9 +180,9 @@ export class EnvManager {
       throw new Error('No profile is currently loaded')
     }
 
-    // Handle unknown profile case
     if (currentlyLoaded === 'unknown') {
-      const commands = `rm -f ~/.envctl/backup.env`
+      const backupFile = this.getSessionBackupPath()
+      const commands = `rm -f ${backupFile}`
       return { commands, profileName: 'unknown' }
     }
 
@@ -182,16 +192,17 @@ export class EnvManager {
     }
 
     const commands: string[] = []
+    const backupFile = this.getSessionBackupPath()
 
     for (const key of Object.keys(profile.variables)) {
-      commands.push(`if grep -q "^${key}=" ~/.envctl/backup.env 2>/dev/null; then`)
-      commands.push(`  export ${key}="$(grep "^${key}=" ~/.envctl/backup.env | cut -d'=' -f2-)"`)
+      commands.push(`if grep -q "^${key}=" ${backupFile} 2>/dev/null; then`)
+      commands.push(`  export ${key}="$(grep "^${key}=" ${backupFile} | cut -d'=' -f2-)"`)
       commands.push(`else`)
       commands.push(`  unset ${key}`)
       commands.push(`fi`)
     }
 
-    commands.push('rm -f ~/.envctl/backup.env')
+    commands.push(`rm -f ${backupFile}`)
 
     return {
       commands: commands.join('\n'),
@@ -208,29 +219,25 @@ export class EnvManager {
     const currentlyLoaded = await this.storage.getCurrentlyLoadedProfile()
 
     if (!currentlyLoaded) {
-      // No profile loaded - just load the new one
       const commands = await this.generateLoadCommands(profileName, newProfile)
       return { commands, to: profileName }
     }
 
     if (currentlyLoaded === profileName) {
-      // Same profile - just reload it
       const commands = await this.reloadCurrentProfile(profileName, newProfile)
       return { commands, from: profileName, to: profileName }
     }
 
-    // Different profile - unload current and load new
     const commands: string[] = []
+    const backupFile = this.getSessionBackupPath()
 
-    // Only try to unload if we know what profile is loaded
     if (currentlyLoaded !== 'unknown') {
       const currentProfile = await this.storage.loadProfile(currentlyLoaded)
 
       if (currentProfile) {
-        // Unload current profile
         for (const key of Object.keys(currentProfile.variables)) {
-          commands.push(`if grep -q "^${key}=" ~/.envctl/backup.env 2>/dev/null; then`)
-          commands.push(`  export ${key}="$(grep "^${key}=" ~/.envctl/backup.env | cut -d'=' -f2-)"`)
+          commands.push(`if grep -q "^${key}=" ${backupFile} 2>/dev/null; then`)
+          commands.push(`  export ${key}="$(grep "^${key}=" ${backupFile} | cut -d'=' -f2-)"`)
           commands.push(`else`)
           commands.push(`  unset ${key}`)
           commands.push(`fi`)
@@ -238,11 +245,10 @@ export class EnvManager {
       }
     }
 
-    // Load new profile
-    commands.push(`echo "# envctl-profile:${profileName}" > ~/.envctl/backup.env`)
+    commands.push(`echo "# envctl-profile:${profileName}" > ${backupFile}`)
 
     for (const key of Object.keys(newProfile.variables)) {
-      commands.push(`[ -n "\${${key}+x}" ] && echo "${key}=$${key}" >> ~/.envctl/backup.env`)
+      commands.push(`[ -n "\${${key}+x}" ] && echo "${key}=$${key}" >> ${backupFile}`)
     }
 
     for (const [key, value] of Object.entries(newProfile.variables)) {
@@ -252,36 +258,80 @@ export class EnvManager {
     return { commands: commands.join('\n'), from: currentlyLoaded, to: profileName }
   }
 
-  getStatus = async (): Promise<{ currentProfile?: string; variableCount?: number }> => {
-    const currentlyLoaded = await this.storage.getCurrentlyLoadedProfile()
+  getStatus = async (): Promise<{
+    currentSession: { sessionId: string; profileName?: string; variableCount?: number }
+    otherSessions: Array<{ sessionId: string; profileName: string }>
+    totalSessions: number
+  }> => {
+    const currentProfile = await this.storage.getCurrentlyLoadedProfile()
+    const allSessions = await this.getSessions()
+    const currentSessionId = this.storage['getSessionId']()
 
-    if (!currentlyLoaded) {
-      return {}
+    const currentSession: { sessionId: string; profileName?: string; variableCount?: number } = {
+      sessionId: currentSessionId,
     }
 
-    // Handle unknown profile (backup exists but no profile marker)
-    if (currentlyLoaded === 'unknown') {
-      return { currentProfile: 'unknown', variableCount: 0 }
+    if (currentProfile) {
+      currentSession.profileName = currentProfile
+      if (currentProfile !== 'unknown') {
+        const profile = await this.storage.loadProfile(currentProfile)
+        currentSession.variableCount = profile ? Object.keys(profile.variables).length : 0
+      }
     }
 
-    const profile = await this.storage.loadProfile(currentlyLoaded)
+    const otherSessions = allSessions.filter((session) => session.sessionId !== currentSessionId)
+
     return {
-      currentProfile: currentlyLoaded,
-      variableCount: profile ? Object.keys(profile.variables).length : 0,
+      currentSession,
+      otherSessions,
+      totalSessions: allSessions.length,
     }
   }
 
-  listProfiles = async (): Promise<Array<{ name: string; isLoaded: boolean; variableCount: number }>> => {
+  private getSessionId(): string {
+    // Universal approach: Use shell PID + SHLVL combination
+    // The key insight: shell commands and Node.js CLI have parent-child relationship
+    // Shell creates backup with shell's PPID, but Node.js CLI should use shell's PID
+    // Solution: Node.js CLI uses its PPID (which is shell's PID) as the session base
+
+    const shellPid = process.ppid || 0 // Node.js CLI's PPID = Shell's PID
+    const shlvl = process.env.SHLVL || '1'
+
+    // Add terminal context if available for additional uniqueness
+    let terminalContext = ''
+    if (process.env.TERM_PROGRAM) {
+      terminalContext = `-${process.env.TERM_PROGRAM}`
+    } else if (process.env.SSH_TTY) {
+      terminalContext = '-ssh'
+    } else if (process.env.TERM) {
+      terminalContext = `-${process.env.TERM.split('-')[0]}` // e.g., "xterm" from "xterm-256color"
+    }
+
+    return `${shellPid}-${shlvl}${terminalContext}`
+  }
+
+  getSessions = async (): Promise<Array<{ sessionId: string; profileName: string }>> => {
+    return await this.storage.listActiveSessions()
+  }
+
+  listProfiles = async (): Promise<
+    Array<{ name: string; isLoaded: boolean; variableCount: number; loadedInSessions?: string[] }>
+  > => {
     const profiles = await this.storage.listProfiles()
-    const currentlyLoaded = await this.storage.getCurrentlyLoadedProfile()
+    const allSessions = await this.storage.listActiveSessions()
 
     const result = []
     for (const name of profiles) {
       const profile = await this.storage.loadProfile(name)
+      const loadedInSessions = allSessions
+        .filter((session) => session.profileName === name)
+        .map((session) => session.sessionId)
+
       result.push({
         name,
-        isLoaded: currentlyLoaded === name,
+        isLoaded: loadedInSessions.length > 0,
         variableCount: profile ? Object.keys(profile.variables).length : 0,
+        loadedInSessions: loadedInSessions.length > 0 ? loadedInSessions : undefined,
       })
     }
 
