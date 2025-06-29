@@ -233,55 +233,72 @@ UNQUOTED=no quotes`
       await envManager.addVariable('test-profile', 'API_KEY', 'secret123')
     })
 
-    it('should load profile and set environment variables', async () => {
-      // Set some existing environment variables
-      process.env.TEST_VAR = 'original-value'
-      process.env.EXISTING_VAR = 'keep-this'
+    it('should generate correct shell commands for loading', async () => {
+      const commands = await envManager.loadProfile('test-profile')
 
-      await envManager.loadProfile('test-profile')
-
-      // Check that variables are set
-      expect(process.env.TEST_VAR).toBe('test-value')
-      expect(process.env.API_KEY).toBe('secret123')
-      expect(process.env.EXISTING_VAR).toBe('keep-this') // Should not be affected
-
-      // Check status
-      const status = await envManager.getStatus()
-      expect(status.currentProfile).toBe('test-profile')
-      expect(status.variableCount).toBe(2)
+      // Should include backup file creation with profile marker
+      expect(commands).toContain('echo "# envctl-profile:test-profile" > ~/.envctl/backup.env')
+      // Should include backup commands for existing variables
+      expect(commands).toContain('[ -n "${TEST_VAR+x}" ] && echo "TEST_VAR=$TEST_VAR" >> ~/.envctl/backup.env')
+      expect(commands).toContain('[ -n "${API_KEY+x}" ] && echo "API_KEY=$API_KEY" >> ~/.envctl/backup.env')
+      // Should include export commands
+      expect(commands).toContain('export TEST_VAR="test-value"')
+      expect(commands).toContain('export API_KEY="secret123"')
     })
 
-    it('should backup and restore environment variables on unload', async () => {
-      // Set original values and ensure clean state
-      process.env.TEST_VAR = 'original-value'
-      if ('API_KEY' in process.env) {
-        delete process.env.API_KEY
-      }
+    it('should generate reload commands when same profile already loaded', async () => {
+      // Simulate profile being loaded by creating backup file
+      const { getConfig } = await import('./config')
+      const config = getConfig()
+      const backupFile = path.join(config.configDir, 'backup.env')
+      await fs.ensureDir(config.configDir)
+      await fs.writeFile(backupFile, '# envctl-profile:test-profile\nTEST_VAR=old-value\n')
 
-      await envManager.loadProfile('test-profile')
+      const commands = await envManager.loadProfile('test-profile')
 
-      // Variables should be changed
-      expect(process.env.TEST_VAR).toBe('test-value')
-      expect(process.env.API_KEY).toBe('secret123')
-
-      const profileName = await envManager.unloadProfile()
-      expect(profileName).toBe('test-profile')
-
-      // Variables should be restored - NEW BEHAVIOR: File-based backup works correctly!
-      expect(process.env.TEST_VAR).toBe('original-value')
-      expect(process.env.API_KEY).toBeUndefined() // Now correctly undefined!
-
-      // Status should show no profile loaded
-      const status = await envManager.getStatus()
-      expect(status.currentProfile).toBeUndefined()
+      // Should include unload commands first
+      expect(commands).toContain('if grep -q "^TEST_VAR=" ~/.envctl/backup.env 2>/dev/null; then')
+      expect(commands).toContain('export TEST_VAR="$(grep "^TEST_VAR=" ~/.envctl/backup.env | cut -d\'=\' -f2-)"')
+      expect(commands).toContain('unset TEST_VAR')
+      // Then load commands
+      expect(commands).toContain('echo "# envctl-profile:test-profile" > ~/.envctl/backup.env')
+      expect(commands).toContain('export TEST_VAR="test-value"')
     })
 
-    it('should throw error if trying to load when profile already loaded', async () => {
-      await envManager.loadProfile('test-profile')
+    it('should throw error if trying to load different profile when one already loaded', async () => {
+      // Simulate different profile being loaded
+      const { getConfig } = await import('./config')
+      const config = getConfig()
+      const backupFile = path.join(config.configDir, 'backup.env')
+      await fs.ensureDir(config.configDir)
+      await fs.writeFile(backupFile, '# envctl-profile:other-profile\n')
 
       await expect(envManager.loadProfile('test-profile')).rejects.toThrow(
-        "Profile 'test-profile' is already loaded. Unload it first.",
+        "Profile 'other-profile' is already loaded. Use 'envctl switch test-profile' to switch profiles.",
       )
+    })
+
+    it('should generate unload commands correctly', async () => {
+      // Simulate profile being loaded
+      const { getConfig } = await import('./config')
+      const config = getConfig()
+      const backupFile = path.join(config.configDir, 'backup.env')
+      await fs.ensureDir(config.configDir)
+      await fs.writeFile(
+        backupFile,
+        '# envctl-profile:test-profile\nTEST_VAR=original-value\nAPI_KEY=original-secret\n',
+      )
+
+      const result = await envManager.unloadProfile()
+
+      expect(result.profileName).toBe('test-profile')
+      expect(result.commands).toContain('if grep -q "^TEST_VAR=" ~/.envctl/backup.env 2>/dev/null; then')
+      expect(result.commands).toContain(
+        'export TEST_VAR="$(grep "^TEST_VAR=" ~/.envctl/backup.env | cut -d\'=\' -f2-)"',
+      )
+      expect(result.commands).toContain('if grep -q "^API_KEY=" ~/.envctl/backup.env 2>/dev/null; then')
+      expect(result.commands).toContain('export API_KEY="$(grep "^API_KEY=" ~/.envctl/backup.env | cut -d\'=\' -f2-)"')
+      expect(result.commands).toContain('rm -f ~/.envctl/backup.env')
     })
 
     it('should throw error if trying to unload when no profile loaded', async () => {
@@ -291,65 +308,19 @@ UNQUOTED=no quotes`
     it('should throw error if profile does not exist', async () => {
       await expect(envManager.loadProfile('nonexistent')).rejects.toThrow("Profile 'nonexistent' does not exist")
     })
-  })
 
-  describe('generateShellCommands', () => {
-    beforeEach(async () => {
-      await envManager.createProfile('test-profile')
-      await envManager.addVariable('test-profile', 'TEST_VAR', 'test-value')
-      await envManager.addVariable('test-profile', 'API_KEY', 'secret123')
-    })
+    it('should handle unknown profile unload', async () => {
+      // Simulate backup file without profile marker
+      const { getConfig } = await import('./config')
+      const config = getConfig()
+      const backupFile = path.join(config.configDir, 'backup.env')
+      await fs.ensureDir(config.configDir)
+      await fs.writeFile(backupFile, 'TEST_VAR=some-value\n')
 
-    it('should generate correct shell commands for loading', async () => {
-      const commands = await envManager.generateShellCommands('test-profile')
+      const result = await envManager.unloadProfile()
 
-      // New file-based backup commands
-      expect(commands).toContain('[ -n "${TEST_VAR+x}" ] && echo "TEST_VAR=$TEST_VAR" >> ~/.envctl/backup.env')
-      expect(commands).toContain('[ -n "${API_KEY+x}" ] && echo "API_KEY=$API_KEY" >> ~/.envctl/backup.env')
-      expect(commands).toContain('export TEST_VAR="test-value"')
-      expect(commands).toContain('export API_KEY="secret123"')
-    })
-
-    it('should throw error if profile does not exist', async () => {
-      await expect(envManager.generateShellCommands('nonexistent')).rejects.toThrow(
-        "Profile 'nonexistent' does not exist",
-      )
-    })
-
-    it('should throw error if profile already loaded', async () => {
-      await envManager.loadProfile('test-profile')
-
-      await expect(envManager.generateShellCommands('test-profile')).rejects.toThrow(
-        "Profile 'test-profile' is already loaded. Unload it first.",
-      )
-    })
-  })
-
-  describe('generateUnloadCommands', () => {
-    beforeEach(async () => {
-      await envManager.createProfile('test-profile')
-      await envManager.addVariable('test-profile', 'TEST_VAR', 'test-value')
-      await envManager.addVariable('test-profile', 'API_KEY', 'secret123')
-      await envManager.loadProfile('test-profile')
-    })
-
-    it('should generate correct shell commands for unloading', async () => {
-      const result = await envManager.generateUnloadCommands()
-
-      expect(result.profileName).toBe('test-profile')
-      // New file-based restore commands
-      expect(result.commands).toContain('if grep -q "^TEST_VAR=" ~/.envctl/backup.env 2>/dev/null; then')
-      expect(result.commands).toContain(
-        'export TEST_VAR="$(grep "^TEST_VAR=" ~/.envctl/backup.env | cut -d\'=\' -f2-)"',
-      )
-      expect(result.commands).toContain('unset TEST_VAR')
-      expect(result.commands).toContain('rm -f ~/.envctl/backup.env')
-    })
-
-    it('should throw error if no profile loaded', async () => {
-      await envManager.unloadProfile() // Unload first
-
-      await expect(envManager.generateUnloadCommands()).rejects.toThrow('No profile is currently loaded')
+      expect(result.profileName).toBe('unknown')
+      expect(result.commands).toBe('rm -f ~/.envctl/backup.env')
     })
   })
 
@@ -386,7 +357,13 @@ UNQUOTED=no quotes`
 
     it('should throw error if trying to delete loaded profile', async () => {
       await envManager.addVariable('test-profile', 'TEST_VAR', 'value')
-      await envManager.loadProfile('test-profile')
+
+      // Simulate profile being loaded by creating backup file
+      const { getConfig } = await import('./config')
+      const config = getConfig()
+      const backupFile = path.join(config.configDir, 'backup.env')
+      await fs.ensureDir(config.configDir)
+      await fs.writeFile(backupFile, '# envctl-profile:test-profile\nTEST_VAR=old-value\n')
 
       await expect(envManager.deleteProfile('test-profile')).rejects.toThrow(
         "Cannot delete profile 'test-profile' while it is loaded. Unload it first.",
@@ -403,7 +380,13 @@ UNQUOTED=no quotes`
       await envManager.createProfile('profile1')
       await envManager.createProfile('profile2')
       await envManager.addVariable('profile1', 'TEST_VAR', 'value')
-      await envManager.loadProfile('profile1')
+
+      // Simulate profile1 being loaded by creating backup file
+      const { getConfig } = await import('./config')
+      const config = getConfig()
+      const backupFile = path.join(config.configDir, 'backup.env')
+      await fs.ensureDir(config.configDir)
+      await fs.writeFile(backupFile, '# envctl-profile:profile1\nTEST_VAR=old-value\n')
 
       const profiles = await envManager.listProfiles()
 
@@ -435,7 +418,13 @@ UNQUOTED=no quotes`
     it('should return correct status when profile loaded', async () => {
       await envManager.createProfile('test-profile')
       await envManager.addVariable('test-profile', 'TEST_VAR', 'value')
-      await envManager.loadProfile('test-profile')
+
+      // Simulate profile being loaded by creating backup file
+      const { getConfig } = await import('./config')
+      const config = getConfig()
+      const backupFile = path.join(config.configDir, 'backup.env')
+      await fs.ensureDir(config.configDir)
+      await fs.writeFile(backupFile, '# envctl-profile:test-profile\nTEST_VAR=old-value\n')
 
       const status = await envManager.getStatus()
       expect(status).toEqual({
@@ -456,123 +445,31 @@ UNQUOTED=no quotes`
       await envManager.addVariable('profile-b', 'SHARED_VAR', 'from-b')
     })
 
-    it('should switch from one profile to another', async () => {
-      // Set some original environment
-      process.env.SHARED_VAR = 'original-shared'
-      process.env.EXISTING_VAR = 'keep-this'
-
-      // Load first profile
-      await envManager.loadProfile('profile-a')
-      expect(process.env.PROFILE_A_VAR).toBe('value-a')
-      expect(process.env.SHARED_VAR).toBe('from-a')
-
-      // Switch to second profile
-      const result = await envManager.switchProfile('profile-b')
-
-      expect(result).toEqual({
-        from: 'profile-a',
-        to: 'profile-b',
-      })
-
-      // Check environment state
-      expect(process.env.PROFILE_A_VAR).toBeUndefined() // Should be removed
-      expect(process.env.PROFILE_B_VAR).toBe('value-b') // Should be set
-      expect(process.env.SHARED_VAR).toBe('from-b') // Should be updated
-      expect(process.env.EXISTING_VAR).toBe('keep-this') // Should be unchanged
-
-      // Check status
-      const status = await envManager.getStatus()
-      expect(status.currentProfile).toBe('profile-b')
-    })
-
-    it('should switch to profile when no profile currently loaded', async () => {
-      const result = await envManager.switchProfile('profile-a')
-
-      expect(result).toEqual({
-        from: undefined,
-        to: 'profile-a',
-      })
-
-      expect(process.env.PROFILE_A_VAR).toBe('value-a')
-
-      const status = await envManager.getStatus()
-      expect(status.currentProfile).toBe('profile-a')
-    })
-
-    it('should handle switching to the same profile', async () => {
-      await envManager.loadProfile('profile-a')
-
-      // This should work - unload and reload the same profile
-      const result = await envManager.switchProfile('profile-a')
-
-      expect(result).toEqual({
-        from: 'profile-a',
-        to: 'profile-a',
-      })
-
-      expect(process.env.PROFILE_A_VAR).toBe('value-a')
-    })
-
-    it('should throw error if target profile does not exist', async () => {
-      await expect(envManager.switchProfile('nonexistent')).rejects.toThrow("Profile 'nonexistent' does not exist")
-    })
-
-    it('should restore original environment correctly when switching', async () => {
-      // Set original values
-      process.env.SHARED_VAR = 'original-shared'
-      delete process.env.PROFILE_A_VAR // Ensure this doesn't exist
-
-      // Load profile A
-      await envManager.loadProfile('profile-a')
-      expect(process.env.SHARED_VAR).toBe('from-a')
-      expect(process.env.PROFILE_A_VAR).toBe('value-a')
-
-      // Switch to profile B
-      await envManager.switchProfile('profile-b')
-
-      // SHARED_VAR should be restored to original, then set to profile B value
-      expect(process.env.SHARED_VAR).toBe('from-b')
-      // PROFILE_A_VAR should be removed since it didn't exist originally
-      expect(process.env.PROFILE_A_VAR).toBeUndefined()
-      // PROFILE_B_VAR should be set
-      expect(process.env.PROFILE_B_VAR).toBe('value-b')
-    })
-  })
-
-  describe('generateSwitchCommands', () => {
-    beforeEach(async () => {
-      await envManager.createProfile('profile-a')
-      await envManager.addVariable('profile-a', 'PROFILE_A_VAR', 'value-a')
-      await envManager.addVariable('profile-a', 'SHARED_VAR', 'from-a')
-
-      await envManager.createProfile('profile-b')
-      await envManager.addVariable('profile-b', 'PROFILE_B_VAR', 'value-b')
-      await envManager.addVariable('profile-b', 'SHARED_VAR', 'from-b')
-    })
-
     it('should generate switch commands when no profile is loaded', async () => {
-      const result = await envManager.generateSwitchCommands('profile-a')
+      const result = await envManager.switchProfile('profile-a')
 
       expect(result.from).toBeUndefined()
       expect(result.to).toBe('profile-a')
       expect(result.commands).toContain('export PROFILE_A_VAR="value-a"')
       expect(result.commands).toContain('export SHARED_VAR="from-a"')
+      expect(result.commands).toContain('echo "# envctl-profile:profile-a" > ~/.envctl/backup.env')
       expect(result.commands).toContain(
         '[ -n "${PROFILE_A_VAR+x}" ] && echo "PROFILE_A_VAR=$PROFILE_A_VAR" >> ~/.envctl/backup.env',
       )
       expect(result.commands).toContain(
         '[ -n "${SHARED_VAR+x}" ] && echo "SHARED_VAR=$SHARED_VAR" >> ~/.envctl/backup.env',
       )
-
-      // Should not contain unload commands since no profile was loaded
-      expect(result.commands).not.toContain('if grep -q "^PROFILE_A_VAR=" ~/.envctl/backup.env')
     })
 
     it('should generate switch commands when profile is already loaded', async () => {
-      // First load profile-a
-      await envManager.loadProfile('profile-a')
+      // Simulate profile-a being loaded
+      const { getConfig } = await import('./config')
+      const config = getConfig()
+      const backupFile = path.join(config.configDir, 'backup.env')
+      await fs.ensureDir(config.configDir)
+      await fs.writeFile(backupFile, '# envctl-profile:profile-a\nPROFILE_A_VAR=old-value\n')
 
-      const result = await envManager.generateSwitchCommands('profile-b')
+      const result = await envManager.switchProfile('profile-b')
 
       expect(result.from).toBe('profile-a')
       expect(result.to).toBe('profile-b')
@@ -580,56 +477,50 @@ UNQUOTED=no quotes`
       // Should contain unload commands for profile-a
       expect(result.commands).toContain('if grep -q "^PROFILE_A_VAR=" ~/.envctl/backup.env')
       expect(result.commands).toContain('if grep -q "^SHARED_VAR=" ~/.envctl/backup.env')
-      expect(result.commands).toContain('rm -f ~/.envctl/backup.env')
 
       // Should contain load commands for profile-b
       expect(result.commands).toContain('export PROFILE_B_VAR="value-b"')
       expect(result.commands).toContain('export SHARED_VAR="from-b"')
-      expect(result.commands).toContain(
-        '[ -n "${PROFILE_B_VAR+x}" ] && echo "PROFILE_B_VAR=$PROFILE_B_VAR" >> ~/.envctl/backup.env',
-      )
+      expect(result.commands).toContain('echo "# envctl-profile:profile-b" > ~/.envctl/backup.env')
     })
 
-    it('should handle switching to the same profile', async () => {
-      await envManager.loadProfile('profile-a')
+    it('should handle switching to the same profile (reload)', async () => {
+      // Simulate profile-a being loaded
+      const { getConfig } = await import('./config')
+      const config = getConfig()
+      const backupFile = path.join(config.configDir, 'backup.env')
+      await fs.ensureDir(config.configDir)
+      await fs.writeFile(backupFile, '# envctl-profile:profile-a\nPROFILE_A_VAR=old-value\n')
 
-      const result = await envManager.generateSwitchCommands('profile-a')
+      const result = await envManager.switchProfile('profile-a')
 
       expect(result.from).toBe('profile-a')
       expect(result.to).toBe('profile-a')
 
-      // Should contain both unload and load commands
+      // Should contain reload commands (unload then load)
       expect(result.commands).toContain('if grep -q "^PROFILE_A_VAR=" ~/.envctl/backup.env')
       expect(result.commands).toContain('export PROFILE_A_VAR="value-a"')
+      expect(result.commands).toContain('echo "# envctl-profile:profile-a" > ~/.envctl/backup.env')
     })
 
     it('should throw error if target profile does not exist', async () => {
-      await expect(envManager.generateSwitchCommands('nonexistent')).rejects.toThrow(
-        "Profile 'nonexistent' does not exist",
-      )
+      await expect(envManager.switchProfile('nonexistent')).rejects.toThrow("Profile 'nonexistent' does not exist")
     })
 
-    it('should throw error if current profile cannot be found', async () => {
-      // Create a separate storage instance to manipulate state directly
-      const { Storage } = await import('./storage')
-      const storage = new Storage()
+    it('should handle switch from unknown profile', async () => {
+      // Simulate backup file without profile marker (unknown profile)
+      const { getConfig } = await import('./config')
+      const config = getConfig()
+      const backupFile = path.join(config.configDir, 'backup.env')
+      await fs.ensureDir(config.configDir)
+      await fs.writeFile(backupFile, 'SOME_VAR=some-value\n')
 
-      // Manually set a state with non-existent profile
-      await storage.saveState({ currentProfile: 'nonexistent' })
+      const result = await envManager.switchProfile('profile-a')
 
-      await expect(envManager.generateSwitchCommands('profile-a')).rejects.toThrow(
-        "Current profile 'nonexistent' not found",
-      )
-    })
-
-    it('should update state correctly', async () => {
-      await envManager.generateSwitchCommands('profile-a')
-
-      // Create a separate storage instance to check state
-      const { Storage } = await import('./storage')
-      const storage = new Storage()
-      const state = await storage.loadState()
-      expect(state.currentProfile).toBe('profile-a')
+      expect(result.from).toBe('unknown')
+      expect(result.to).toBe('profile-a')
+      expect(result.commands).toContain('export PROFILE_A_VAR="value-a"')
+      expect(result.commands).toContain('echo "# envctl-profile:profile-a" > ~/.envctl/backup.env')
     })
   })
 
@@ -840,7 +731,13 @@ export EDITOR=vim`
       // Create some test data
       await envManager.createProfile('test-profile')
       await envManager.addVariable('test-profile', 'TEST_VAR', 'value')
-      await envManager.loadProfile('test-profile')
+
+      // Simulate profile being loaded by creating backup file
+      const { getConfig } = await import('./config')
+      const config = getConfig()
+      const backupFile = path.join(config.configDir, 'backup.env')
+      await fs.ensureDir(config.configDir)
+      await fs.writeFile(backupFile, '# envctl-profile:test-profile\nTEST_VAR=old-value\n')
 
       // Verify profile is loaded
       const statusBefore = await envManager.getStatus()
@@ -849,7 +746,7 @@ export EDITOR=vim`
       // Cleanup all data
       const result = await envManager.cleanupAllData()
 
-      expect(result.removed).toContain('Unloaded current profile')
+      expect(result.removed).toContain("Unloaded current profile 'test-profile'")
       expect(result.removed.length).toBeGreaterThan(1) // Should have unloaded message + config dir
       expect(result.removed.some((item) => item.includes(tempDir))).toBe(true)
 
@@ -869,12 +766,14 @@ export EDITOR=vim`
     })
 
     it('should handle case where profile is corrupted', async () => {
-      // Create a corrupted state by manually setting invalid state
-      const { Storage } = await import('./storage')
-      const storage = new Storage()
-      await storage.saveState({ currentProfile: 'nonexistent-profile' })
+      // Create a corrupted backup file referencing a non-existent profile
+      const { getConfig } = await import('./config')
+      const config = getConfig()
+      const backupFile = path.join(config.configDir, 'backup.env')
+      await fs.ensureDir(config.configDir)
+      await fs.writeFile(backupFile, '# envctl-profile:nonexistent-profile\nTEST_VAR=some-value\n')
 
-      // Should not throw error
+      // Should not throw error even with corrupted backup file
       const result = await envManager.cleanupAllData()
 
       expect(result.removed.length).toBeGreaterThan(0)

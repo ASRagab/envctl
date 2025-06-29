@@ -2,13 +2,30 @@
 
 A environment variable context manager for development workflows. Easily create, manage, and switch between different sets of environment variables.
 
+## 🔄 **Streamlined Workflow**
+
+envctl uses a **simple, transparent approach**: environment commands like `load`, `unload`, and `switch` output shell commands that you execute with `eval`. This means:
+
+```bash
+# See what will happen
+envctl load dev
+
+# Execute it when you're ready
+eval "$(envctl load dev)"
+
+# Or use the convenient shell functions (installed via `envctl setup`)
+envctl-load dev  # Same as eval "$(envctl load dev)"
+```
+
 ## Features
 
 - ✅ Create and manage multiple environment variable profiles/contexts
 - ✅ Add variables directly via CLI or import from files
 - ✅ Load and unload profiles with proper environment restoration
+- ✅ **Smart reload**: Loading the same profile again refreshes it seamlessly
 - ✅ Remove and update individual variables
 - ✅ Export profiles for sharing or backup
+- ✅ **Streamlined workflow**: All commands output shell commands directly
 - ✅ No folder structure dependency (unlike direnv)
 
 ## Installation
@@ -48,13 +65,13 @@ If you prefer manual setup or the automatic setup doesn't work:
 
 ```bash
 # Load a profile
-eval "$(envctl load --shell dev)"
+eval "$(envctl load dev)"
 
 # Switch to a different profile
-eval "$(envctl switch --shell staging)"
+eval "$(envctl switch staging)"
 
 # Unload a profile
-eval "$(envctl unload --shell)"
+eval "$(envctl unload)"
 ```
 
 **Option 2: Manual shell functions installation**
@@ -123,6 +140,9 @@ envctl list
 
 # List variables in a profile
 envctl list dev
+
+# Reload the same profile (refreshes environment - no need to unload first!)
+envctl-load dev
 
 # Switch to a different profile (unload current + load new)
 envctl-switch production
@@ -215,34 +235,48 @@ envctl remove dev API_KEY
 
 ### `envctl load <profile>`
 
-Load a profile into the current shell session. This will:
+Load a profile into the current shell session. This command outputs shell commands that you can execute with `eval`:
 
 - Backup current values of variables that will be overwritten
 - Set all variables from the profile
-- Mark the profile as currently loaded
+- **Smart reload**: If the same profile is already loaded, it will refresh it instead of throwing an error
 
 ```bash
+# Output shell commands for loading
 envctl load dev
+
+# Execute the commands to actually load the profile
+eval "$(envctl load dev)"
+
+# Reload the same profile (refreshes environment)
+eval "$(envctl load dev)"  # This works - no need to unload first!
 ```
 
 ### `envctl unload`
 
-Unload the currently loaded profile and restore the previous environment.
+Unload the currently loaded profile and restore the previous environment. This command outputs shell commands:
 
 ```bash
+# Output shell commands for unloading
 envctl unload
+
+# Execute the commands to actually unload the profile
+eval "$(envctl unload)"
 ```
 
 ### `envctl switch <profile>`
 
-Switch to a different profile in one command. This will unload the current profile (if any) and load the new one.
+Switch to a different profile in one command. This command outputs shell commands that will unload the current profile (if any) and load the new one.
 
 ```bash
-# Switch from current profile to staging
+# Output shell commands for switching
 envctl switch staging
 
-# Load a profile when none is currently loaded
-envctl switch dev
+# Execute the commands to actually switch
+eval "$(envctl switch staging)"
+
+# Switch when no profile is currently loaded (just loads the profile)
+eval "$(envctl switch dev)"
 ```
 
 ### `envctl status`
@@ -329,19 +363,28 @@ envctl unsetup --all --force
 
 ## How It Works
 
+### Streamlined Shell Integration
+
+envctl uses a **streamlined approach** where all environment-affecting commands output shell commands that you execute with `eval`. This ensures:
+
+- **Predictable behavior**: Commands always work the same way
+- **Maximum compatibility**: Works with any shell and environment
+
 ### Environment Management
 
-- **Loading**: When you load a profile, envctl backs up the current values of any environment variables that will be overwritten to `~/.envctl/backup.env`, then sets the new values.
-- **Unloading**: When you unload, it restores the original values from the backup file (or unsets variables that weren't previously set).
-- **State Tracking**: The tool keeps track of what's currently loaded in `~/.envctl/state.json`.
-- **Smart Backup**: Only variables that actually exist are backed up, ensuring clean environment restoration.
+- **Loading**: When you load a profile, envctl generates shell commands that backup current values of environment variables to `~/.envctl/backup.env`, then set the new values.
+- **Unloading**: When you unload, it generates commands that restore original values from the backup file (or unset variables that weren't previously set).
+- **Stateless Design**: No persistent state files - the backup file serves as both backup storage and state indicator.
+- **Smart Reload**: Loading the same profile again refreshes it by restoring from backup first, then setting new values.
 
 ### File Storage
 
 - Profiles are stored in `~/.envctl/profiles/` as JSON files
 - Each profile contains metadata (creation/update times) and the environment variables
-- State information is stored in `~/.envctl/state.json`
-- Environment backup is stored in `~/.envctl/backup.env` (only when a profile is loaded)
+- **Backup file** (`~/.envctl/backup.env`) serves dual purpose:
+  - Contains original environment variable values for restoration
+  - Includes profile marker (`# envctl-profile:name`) to track what's loaded
+- **No state.json**: Stateless design eliminates state synchronization issues
 
 ### Cross-Platform
 
@@ -387,11 +430,11 @@ envctl create project-beta
 envctl add project-beta -f ./beta/.env
 
 # Switch between projects
-envctl load project-alpha
+envctl-load project-alpha
 cd alpha && npm start
 
-envctl unload
-envctl load project-beta
+envctl-unload
+envctl-load project-beta
 cd ../beta && npm start
 ```
 
@@ -416,6 +459,14 @@ cd ../beta && npm start
 - ✅ Proper cleanup when switching environments
 - ✅ No accumulation of environment variables
 - ✅ Centralized management across projects
+
+### envctl's Streamlined Design
+
+- ✅ **Transparent operation**: See exactly what shell commands will be executed
+- ✅ **No hidden state**: Stateless design eliminates synchronization issues
+- ✅ **Smart reload**: Load the same profile multiple times without errors
+- ✅ **Shell agnostic**: Works with bash, zsh, fish, and any POSIX shell
+- ✅ **Predictable behavior**: Commands always work the same way
 
 ## Development
 
