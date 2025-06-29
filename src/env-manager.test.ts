@@ -236,32 +236,46 @@ UNQUOTED=no quotes`
     it('should generate correct shell commands for loading', async () => {
       const commands = await envManager.loadProfile('test-profile')
 
-      // Should include backup file creation with profile marker
-      expect(commands).toContain('echo "# envctl-profile:test-profile" > ~/.envctl/backup.env')
-      // Should include backup commands for existing variables
-      expect(commands).toContain('[ -n "${TEST_VAR+x}" ] && echo "TEST_VAR=$TEST_VAR" >> ~/.envctl/backup.env')
-      expect(commands).toContain('[ -n "${API_KEY+x}" ] && echo "API_KEY=$API_KEY" >> ~/.envctl/backup.env')
+      // Should include backup file creation with profile marker (session-aware path)
+      expect(commands).toContain('echo "# envctl-profile:test-profile" >')
+      expect(commands).toContain('backup-$$-${SHLVL:-1}') // New format with shell PID
+      // Should include backup commands for existing variables (session-aware path)
+      expect(commands).toContain('[ -n "${TEST_VAR+x}" ] && echo "TEST_VAR=$TEST_VAR" >>')
+      expect(commands).toContain('[ -n "${API_KEY+x}" ] && echo "API_KEY=$API_KEY" >>')
       // Should include export commands
       expect(commands).toContain('export TEST_VAR="test-value"')
       expect(commands).toContain('export API_KEY="secret123"')
     })
 
     it('should generate reload commands when same profile already loaded', async () => {
-      // Simulate profile being loaded by creating backup file
+      // Simulate profile being loaded by creating session-aware backup file
       const { getConfig } = await import('./config')
       const config = getConfig()
-      const backupFile = path.join(config.configDir, 'backup.env')
+      // Create a session-specific backup file (simulating current session with shell PID format)
+      const shellPid = process.ppid || 1
+      const shlvl = process.env.SHLVL || '1'
+      let terminalContext = ''
+      if (process.env.TERM_PROGRAM) {
+        terminalContext = `-${process.env.TERM_PROGRAM}`
+      } else if (process.env.SSH_TTY) {
+        terminalContext = '-ssh'
+      } else if (process.env.TERM) {
+        terminalContext = `-${process.env.TERM.split('-')[0]}`
+      }
+      const sessionId = `${shellPid}-${shlvl}${terminalContext}`
+      const backupFile = path.join(config.configDir, `backup-${sessionId}.env`)
       await fs.ensureDir(config.configDir)
       await fs.writeFile(backupFile, '# envctl-profile:test-profile\nTEST_VAR=old-value\n')
 
       const commands = await envManager.loadProfile('test-profile')
 
-      // Should include unload commands first
-      expect(commands).toContain('if grep -q "^TEST_VAR=" ~/.envctl/backup.env 2>/dev/null; then')
-      expect(commands).toContain('export TEST_VAR="$(grep "^TEST_VAR=" ~/.envctl/backup.env | cut -d\'=\' -f2-)"')
+      // Should include unload commands first (session-aware path)
+      expect(commands).toContain('if grep -q "^TEST_VAR="')
+      expect(commands).toContain('backup-$$-${SHLVL:-1}') // New format with shell PID
+      expect(commands).toContain('export TEST_VAR="$(grep "^TEST_VAR="')
       expect(commands).toContain('unset TEST_VAR')
-      // Then load commands
-      expect(commands).toContain('echo "# envctl-profile:test-profile" > ~/.envctl/backup.env')
+      // Then load commands (session-aware path)
+      expect(commands).toContain('echo "# envctl-profile:test-profile" >')
       expect(commands).toContain('export TEST_VAR="test-value"')
     })
 
@@ -269,7 +283,18 @@ UNQUOTED=no quotes`
       // Simulate different profile being loaded
       const { getConfig } = await import('./config')
       const config = getConfig()
-      const backupFile = path.join(config.configDir, 'backup.env')
+      const shellPid = process.ppid || 1
+      const shlvl = process.env.SHLVL || '1'
+      let terminalContext = ''
+      if (process.env.TERM_PROGRAM) {
+        terminalContext = `-${process.env.TERM_PROGRAM}`
+      } else if (process.env.SSH_TTY) {
+        terminalContext = '-ssh'
+      } else if (process.env.TERM) {
+        terminalContext = `-${process.env.TERM.split('-')[0]}`
+      }
+      const sessionId = `${shellPid}-${shlvl}${terminalContext}`
+      const backupFile = path.join(config.configDir, `backup-${sessionId}.env`)
       await fs.ensureDir(config.configDir)
       await fs.writeFile(backupFile, '# envctl-profile:other-profile\n')
 
@@ -282,7 +307,18 @@ UNQUOTED=no quotes`
       // Simulate profile being loaded
       const { getConfig } = await import('./config')
       const config = getConfig()
-      const backupFile = path.join(config.configDir, 'backup.env')
+      const shellPid = process.ppid || 1
+      const shlvl = process.env.SHLVL || '1'
+      let terminalContext = ''
+      if (process.env.TERM_PROGRAM) {
+        terminalContext = `-${process.env.TERM_PROGRAM}`
+      } else if (process.env.SSH_TTY) {
+        terminalContext = '-ssh'
+      } else if (process.env.TERM) {
+        terminalContext = `-${process.env.TERM.split('-')[0]}`
+      }
+      const sessionId = `${shellPid}-${shlvl}${terminalContext}`
+      const backupFile = path.join(config.configDir, `backup-${sessionId}.env`)
       await fs.ensureDir(config.configDir)
       await fs.writeFile(
         backupFile,
@@ -292,13 +328,13 @@ UNQUOTED=no quotes`
       const result = await envManager.unloadProfile()
 
       expect(result.profileName).toBe('test-profile')
-      expect(result.commands).toContain('if grep -q "^TEST_VAR=" ~/.envctl/backup.env 2>/dev/null; then')
-      expect(result.commands).toContain(
-        'export TEST_VAR="$(grep "^TEST_VAR=" ~/.envctl/backup.env | cut -d\'=\' -f2-)"',
-      )
-      expect(result.commands).toContain('if grep -q "^API_KEY=" ~/.envctl/backup.env 2>/dev/null; then')
-      expect(result.commands).toContain('export API_KEY="$(grep "^API_KEY=" ~/.envctl/backup.env | cut -d\'=\' -f2-)"')
-      expect(result.commands).toContain('rm -f ~/.envctl/backup.env')
+      expect(result.commands).toContain('if grep -q "^TEST_VAR="')
+      expect(result.commands).toContain('backup-$$-${SHLVL:-1}') // New format with shell PID
+      expect(result.commands).toContain('export TEST_VAR="$(grep "^TEST_VAR="')
+      expect(result.commands).toContain('if grep -q "^API_KEY="')
+      expect(result.commands).toContain('export API_KEY="$(grep "^API_KEY="')
+      expect(result.commands).toContain('rm -f')
+      expect(result.commands).toContain('backup-$$-${SHLVL:-1}') // Remove command also uses new format
     })
 
     it('should throw error if trying to unload when no profile loaded', async () => {
@@ -313,14 +349,26 @@ UNQUOTED=no quotes`
       // Simulate backup file without profile marker
       const { getConfig } = await import('./config')
       const config = getConfig()
-      const backupFile = path.join(config.configDir, 'backup.env')
+      const shellPid = process.ppid || 1
+      const shlvl = process.env.SHLVL || '1'
+      let terminalContext = ''
+      if (process.env.TERM_PROGRAM) {
+        terminalContext = `-${process.env.TERM_PROGRAM}`
+      } else if (process.env.SSH_TTY) {
+        terminalContext = '-ssh'
+      } else if (process.env.TERM) {
+        terminalContext = `-${process.env.TERM.split('-')[0]}`
+      }
+      const sessionId = `${shellPid}-${shlvl}${terminalContext}`
+      const backupFile = path.join(config.configDir, `backup-${sessionId}.env`)
       await fs.ensureDir(config.configDir)
       await fs.writeFile(backupFile, 'TEST_VAR=some-value\n')
 
       const result = await envManager.unloadProfile()
 
       expect(result.profileName).toBe('unknown')
-      expect(result.commands).toBe('rm -f ~/.envctl/backup.env')
+      expect(result.commands).toContain('rm -f')
+      expect(result.commands).toContain('backup-$$-${SHLVL:-1}') // New format with shell PID
     })
   })
 
@@ -358,10 +406,21 @@ UNQUOTED=no quotes`
     it('should throw error if trying to delete loaded profile', async () => {
       await envManager.addVariable('test-profile', 'TEST_VAR', 'value')
 
-      // Simulate profile being loaded by creating backup file
+      // Simulate profile being loaded by creating session-aware backup file
       const { getConfig } = await import('./config')
       const config = getConfig()
-      const backupFile = path.join(config.configDir, 'backup.env')
+      const shellPid = process.ppid || 1
+      const shlvl = process.env.SHLVL || '1'
+      let terminalContext = ''
+      if (process.env.TERM_PROGRAM) {
+        terminalContext = `-${process.env.TERM_PROGRAM}`
+      } else if (process.env.SSH_TTY) {
+        terminalContext = '-ssh'
+      } else if (process.env.TERM) {
+        terminalContext = `-${process.env.TERM.split('-')[0]}`
+      }
+      const sessionId = `${shellPid}-${shlvl}${terminalContext}`
+      const backupFile = path.join(config.configDir, `backup-${sessionId}.env`)
       await fs.ensureDir(config.configDir)
       await fs.writeFile(backupFile, '# envctl-profile:test-profile\nTEST_VAR=old-value\n')
 
@@ -381,21 +440,34 @@ UNQUOTED=no quotes`
       await envManager.createProfile('profile2')
       await envManager.addVariable('profile1', 'TEST_VAR', 'value')
 
-      // Simulate profile1 being loaded by creating backup file
+      // Simulate profile1 being loaded by creating session-aware backup file
       const { getConfig } = await import('./config')
       const config = getConfig()
-      const backupFile = path.join(config.configDir, 'backup.env')
+      const shellPid = process.ppid || 1
+      const shlvl = process.env.SHLVL || '1'
+      let terminalContext = ''
+      if (process.env.TERM_PROGRAM) {
+        terminalContext = `-${process.env.TERM_PROGRAM}`
+      } else if (process.env.SSH_TTY) {
+        terminalContext = '-ssh'
+      } else if (process.env.TERM) {
+        terminalContext = `-${process.env.TERM.split('-')[0]}`
+      }
+      const sessionId = `${shellPid}-${shlvl}${terminalContext}`
+      const backupFile = path.join(config.configDir, `backup-${sessionId}.env`)
       await fs.ensureDir(config.configDir)
       await fs.writeFile(backupFile, '# envctl-profile:profile1\nTEST_VAR=old-value\n')
 
       const profiles = await envManager.listProfiles()
 
       expect(profiles).toHaveLength(2)
-      expect(profiles.find((p) => p.name === 'profile1')).toEqual({
+      const profile1 = profiles.find((p) => p.name === 'profile1')
+      expect(profile1).toMatchObject({
         name: 'profile1',
         isLoaded: true,
         variableCount: 1,
       })
+      expect(profile1?.loadedInSessions).toHaveLength(1)
       expect(profiles.find((p) => p.name === 'profile2')).toEqual({
         name: 'profile2',
         isLoaded: false,
@@ -412,25 +484,126 @@ UNQUOTED=no quotes`
   describe('getStatus', () => {
     it('should return empty status when no profile loaded', async () => {
       const status = await envManager.getStatus()
-      expect(status).toEqual({})
+      expect(status.currentSession.profileName).toBeUndefined()
+      expect(status.otherSessions).toEqual([])
+      expect(status.totalSessions).toBe(0)
     })
 
-    it('should return correct status when profile loaded', async () => {
+    it('should return correct status when profile loaded in current session', async () => {
       await envManager.createProfile('test-profile')
       await envManager.addVariable('test-profile', 'TEST_VAR', 'value')
 
-      // Simulate profile being loaded by creating backup file
+      // Simulate profile being loaded by creating session-aware backup file
       const { getConfig } = await import('./config')
       const config = getConfig()
-      const backupFile = path.join(config.configDir, 'backup.env')
+      const shellPid = process.ppid || 1
+      const shlvl = process.env.SHLVL || '1'
+      let terminalContext = ''
+      if (process.env.TERM_PROGRAM) {
+        terminalContext = `-${process.env.TERM_PROGRAM}`
+      } else if (process.env.SSH_TTY) {
+        terminalContext = '-ssh'
+      } else if (process.env.TERM) {
+        terminalContext = `-${process.env.TERM.split('-')[0]}`
+      }
+      const sessionId = `${shellPid}-${shlvl}${terminalContext}`
+      const backupFile = path.join(config.configDir, `backup-${sessionId}.env`)
       await fs.ensureDir(config.configDir)
       await fs.writeFile(backupFile, '# envctl-profile:test-profile\nTEST_VAR=old-value\n')
 
       const status = await envManager.getStatus()
-      expect(status).toEqual({
-        currentProfile: 'test-profile',
-        variableCount: 1,
-      })
+      expect(status.currentSession.profileName).toBe('test-profile')
+      expect(status.currentSession.variableCount).toBe(1)
+      expect(status.otherSessions).toEqual([])
+      expect(status.totalSessions).toBe(1)
+    })
+
+    it('should handle session tracking with different PIDs (shell vs Node.js)', async () => {
+      await envManager.createProfile('test-profile')
+      await envManager.addVariable('test-profile', 'TEST_VAR', 'value')
+
+      // Simulate the real-world scenario where shell commands create backup file
+      // Shell uses different PID than Node.js process
+      const { getConfig } = await import('./config')
+      const config = getConfig()
+
+      // Shell would create backup with its own PID (different from Node.js process.pid)
+      const shellSessionId = `${process.ppid || 1}-${process.env.SHLVL || '1'}-999999` // Mock shell PID
+      const backupFile = path.join(config.configDir, `backup-${shellSessionId}.env`)
+      await fs.ensureDir(config.configDir)
+      await fs.writeFile(backupFile, '# envctl-profile:test-profile\nTEST_VAR=old-value\n')
+
+      const status = await envManager.getStatus()
+
+      // CORRECTED: Different PIDs create different sessions - strict session awareness
+      expect(status.currentSession.profileName).toBeUndefined() // No profile in current Node.js session
+      expect(status.otherSessions).toHaveLength(1) // Shell session appears in other sessions
+      expect(status.otherSessions[0].sessionId).toBe(shellSessionId)
+      expect(status.otherSessions[0].profileName).toBe('test-profile')
+      expect(status.totalSessions).toBe(1)
+    })
+
+    it('should detect profiles loaded in other sessions', async () => {
+      await envManager.createProfile('profile-a')
+      await envManager.addVariable('profile-a', 'TEST_VAR', 'value')
+      await envManager.createProfile('profile-b')
+      await envManager.addVariable('profile-b', 'OTHER_VAR', 'other-value')
+
+      // Simulate profile-a being loaded in a different session and profile-b in another
+      const { getConfig } = await import('./config')
+      const config = getConfig()
+      await fs.ensureDir(config.configDir)
+
+      // Create backup files for other sessions (different session IDs)
+      const otherSession1 = path.join(config.configDir, 'backup-1000-1-vscode.env')
+      const otherSession2 = path.join(config.configDir, 'backup-2000-1-terminal.env')
+
+      await fs.writeFile(otherSession1, '# envctl-profile:profile-a\nTEST_VAR=old-value\n')
+      await fs.writeFile(otherSession2, '# envctl-profile:profile-b\nOTHER_VAR=old-other\n')
+
+      const status = await envManager.getStatus()
+      expect(status.currentSession.profileName).toBeUndefined()
+      expect(status.otherSessions).toHaveLength(2)
+      expect(status.otherSessions.find((s) => s.profileName === 'profile-a')).toBeTruthy()
+      expect(status.otherSessions.find((s) => s.profileName === 'profile-b')).toBeTruthy()
+      expect(status.totalSessions).toBe(2)
+    })
+
+    it('should handle mixed session states', async () => {
+      await envManager.createProfile('current-profile')
+      await envManager.addVariable('current-profile', 'CURRENT_VAR', 'current-value')
+      await envManager.createProfile('other-profile')
+      await envManager.addVariable('other-profile', 'OTHER_VAR', 'other-value')
+
+      // Simulate current session having a profile
+      const { getConfig } = await import('./config')
+      const config = getConfig()
+      const shellPid = process.ppid || 1
+      const shlvl = process.env.SHLVL || '1'
+      let terminalContext = ''
+      if (process.env.TERM_PROGRAM) {
+        terminalContext = `-${process.env.TERM_PROGRAM}`
+      } else if (process.env.SSH_TTY) {
+        terminalContext = '-ssh'
+      } else if (process.env.TERM) {
+        terminalContext = `-${process.env.TERM.split('-')[0]}`
+      }
+      const currentSessionId = `${shellPid}-${shlvl}${terminalContext}`
+      const currentBackupFile = path.join(config.configDir, `backup-${currentSessionId}.env`)
+      await fs.ensureDir(config.configDir)
+      await fs.writeFile(currentBackupFile, '# envctl-profile:current-profile\nCURRENT_VAR=old-current\n')
+
+      // Simulate other session having a different profile
+      const otherBackupFile = path.join(config.configDir, 'backup-1000-1-vscode.env')
+      await fs.writeFile(otherBackupFile, '# envctl-profile:other-profile\nOTHER_VAR=old-other\n')
+
+      const status = await envManager.getStatus()
+      expect(status.currentSession.profileName).toBe('current-profile')
+      expect(status.currentSession.variableCount).toBe(1)
+      expect(status.otherSessions).toHaveLength(1)
+      expect(status.otherSessions[0].profileName).toBe('other-profile')
+      expect(status.otherSessions[0].sessionId).toBe('1000-1-vscode')
+      expect(status.totalSessions).toBe(2)
     })
   })
 
@@ -452,20 +625,28 @@ UNQUOTED=no quotes`
       expect(result.to).toBe('profile-a')
       expect(result.commands).toContain('export PROFILE_A_VAR="value-a"')
       expect(result.commands).toContain('export SHARED_VAR="from-a"')
-      expect(result.commands).toContain('echo "# envctl-profile:profile-a" > ~/.envctl/backup.env')
-      expect(result.commands).toContain(
-        '[ -n "${PROFILE_A_VAR+x}" ] && echo "PROFILE_A_VAR=$PROFILE_A_VAR" >> ~/.envctl/backup.env',
-      )
-      expect(result.commands).toContain(
-        '[ -n "${SHARED_VAR+x}" ] && echo "SHARED_VAR=$SHARED_VAR" >> ~/.envctl/backup.env',
-      )
+      expect(result.commands).toContain('echo "# envctl-profile:profile-a" >')
+      expect(result.commands).toContain('backup-$$-${SHLVL:-1}') // New format with shell PID
+      expect(result.commands).toContain('[ -n "${PROFILE_A_VAR+x}" ] && echo "PROFILE_A_VAR=$PROFILE_A_VAR" >>')
+      expect(result.commands).toContain('[ -n "${SHARED_VAR+x}" ] && echo "SHARED_VAR=$SHARED_VAR" >>')
     })
 
     it('should generate switch commands when profile is already loaded', async () => {
       // Simulate profile-a being loaded
       const { getConfig } = await import('./config')
       const config = getConfig()
-      const backupFile = path.join(config.configDir, 'backup.env')
+      const shellPid = process.ppid || 1
+      const shlvl = process.env.SHLVL || '1'
+      let terminalContext = ''
+      if (process.env.TERM_PROGRAM) {
+        terminalContext = `-${process.env.TERM_PROGRAM}`
+      } else if (process.env.SSH_TTY) {
+        terminalContext = '-ssh'
+      } else if (process.env.TERM) {
+        terminalContext = `-${process.env.TERM.split('-')[0]}`
+      }
+      const sessionId = `${shellPid}-${shlvl}${terminalContext}`
+      const backupFile = path.join(config.configDir, `backup-${sessionId}.env`)
       await fs.ensureDir(config.configDir)
       await fs.writeFile(backupFile, '# envctl-profile:profile-a\nPROFILE_A_VAR=old-value\n')
 
@@ -475,20 +656,32 @@ UNQUOTED=no quotes`
       expect(result.to).toBe('profile-b')
 
       // Should contain unload commands for profile-a
-      expect(result.commands).toContain('if grep -q "^PROFILE_A_VAR=" ~/.envctl/backup.env')
-      expect(result.commands).toContain('if grep -q "^SHARED_VAR=" ~/.envctl/backup.env')
+      expect(result.commands).toContain('if grep -q "^PROFILE_A_VAR="')
+      expect(result.commands).toContain('backup-$$-${SHLVL:-1}') // New format with shell PID
+      expect(result.commands).toContain('if grep -q "^SHARED_VAR="')
 
       // Should contain load commands for profile-b
       expect(result.commands).toContain('export PROFILE_B_VAR="value-b"')
       expect(result.commands).toContain('export SHARED_VAR="from-b"')
-      expect(result.commands).toContain('echo "# envctl-profile:profile-b" > ~/.envctl/backup.env')
+      expect(result.commands).toContain('echo "# envctl-profile:profile-b" >')
     })
 
     it('should handle switching to the same profile (reload)', async () => {
       // Simulate profile-a being loaded
       const { getConfig } = await import('./config')
       const config = getConfig()
-      const backupFile = path.join(config.configDir, 'backup.env')
+      const shellPid = process.ppid || 1
+      const shlvl = process.env.SHLVL || '1'
+      let terminalContext = ''
+      if (process.env.TERM_PROGRAM) {
+        terminalContext = `-${process.env.TERM_PROGRAM}`
+      } else if (process.env.SSH_TTY) {
+        terminalContext = '-ssh'
+      } else if (process.env.TERM) {
+        terminalContext = `-${process.env.TERM.split('-')[0]}`
+      }
+      const sessionId = `${shellPid}-${shlvl}${terminalContext}`
+      const backupFile = path.join(config.configDir, `backup-${sessionId}.env`)
       await fs.ensureDir(config.configDir)
       await fs.writeFile(backupFile, '# envctl-profile:profile-a\nPROFILE_A_VAR=old-value\n')
 
@@ -498,9 +691,10 @@ UNQUOTED=no quotes`
       expect(result.to).toBe('profile-a')
 
       // Should contain reload commands (unload then load)
-      expect(result.commands).toContain('if grep -q "^PROFILE_A_VAR=" ~/.envctl/backup.env')
+      expect(result.commands).toContain('if grep -q "^PROFILE_A_VAR="')
+      expect(result.commands).toContain('backup-$$-${SHLVL:-1}') // New format with shell PID
       expect(result.commands).toContain('export PROFILE_A_VAR="value-a"')
-      expect(result.commands).toContain('echo "# envctl-profile:profile-a" > ~/.envctl/backup.env')
+      expect(result.commands).toContain('echo "# envctl-profile:profile-a" >')
     })
 
     it('should throw error if target profile does not exist', async () => {
@@ -511,7 +705,18 @@ UNQUOTED=no quotes`
       // Simulate backup file without profile marker (unknown profile)
       const { getConfig } = await import('./config')
       const config = getConfig()
-      const backupFile = path.join(config.configDir, 'backup.env')
+      const shellPid = process.ppid || 1
+      const shlvl = process.env.SHLVL || '1'
+      let terminalContext = ''
+      if (process.env.TERM_PROGRAM) {
+        terminalContext = `-${process.env.TERM_PROGRAM}`
+      } else if (process.env.SSH_TTY) {
+        terminalContext = '-ssh'
+      } else if (process.env.TERM) {
+        terminalContext = `-${process.env.TERM.split('-')[0]}`
+      }
+      const sessionId = `${shellPid}-${shlvl}${terminalContext}`
+      const backupFile = path.join(config.configDir, `backup-${sessionId}.env`)
       await fs.ensureDir(config.configDir)
       await fs.writeFile(backupFile, 'SOME_VAR=some-value\n')
 
@@ -520,7 +725,8 @@ UNQUOTED=no quotes`
       expect(result.from).toBe('unknown')
       expect(result.to).toBe('profile-a')
       expect(result.commands).toContain('export PROFILE_A_VAR="value-a"')
-      expect(result.commands).toContain('echo "# envctl-profile:profile-a" > ~/.envctl/backup.env')
+      expect(result.commands).toContain('echo "# envctl-profile:profile-a" >')
+      expect(result.commands).toContain('backup-$$-${SHLVL:-1}') // New format with shell PID
     })
   })
 
@@ -728,34 +934,40 @@ export EDITOR=vim`
 
   describe('cleanupAllData', () => {
     it('should remove all envctl data and unload current profile', async () => {
-      // Create some test data
       await envManager.createProfile('test-profile')
       await envManager.addVariable('test-profile', 'TEST_VAR', 'value')
 
-      // Simulate profile being loaded by creating backup file
+      // Simulate profile being loaded by creating session-aware backup file
       const { getConfig } = await import('./config')
       const config = getConfig()
-      const backupFile = path.join(config.configDir, 'backup.env')
+      const shellPid = process.ppid || 1
+      const shlvl = process.env.SHLVL || '1'
+      let terminalContext = ''
+      if (process.env.TERM_PROGRAM) {
+        terminalContext = `-${process.env.TERM_PROGRAM}`
+      } else if (process.env.SSH_TTY) {
+        terminalContext = '-ssh'
+      } else if (process.env.TERM) {
+        terminalContext = `-${process.env.TERM.split('-')[0]}`
+      }
+      const sessionId = `${shellPid}-${shlvl}${terminalContext}`
+      const backupFile = path.join(config.configDir, `backup-${sessionId}.env`)
       await fs.ensureDir(config.configDir)
       await fs.writeFile(backupFile, '# envctl-profile:test-profile\nTEST_VAR=old-value\n')
 
       // Verify profile is loaded
       const statusBefore = await envManager.getStatus()
-      expect(statusBefore.currentProfile).toBe('test-profile')
+      expect(statusBefore.currentSession.profileName).toBe('test-profile')
 
       // Cleanup all data
       const result = await envManager.cleanupAllData()
 
-      expect(result.removed).toContain("Unloaded current profile 'test-profile'")
-      expect(result.removed.length).toBeGreaterThan(1) // Should have unloaded message + config dir
-      expect(result.removed.some((item) => item.includes(tempDir))).toBe(true)
-
-      // Verify data is gone
-      const profiles = await envManager.listProfiles()
-      expect(profiles).toHaveLength(0)
-
       const status = await envManager.getStatus()
-      expect(status.currentProfile).toBeUndefined()
+      expect(status.currentSession.profileName).toBeUndefined()
+      expect(status.otherSessions).toEqual([])
+      expect(status.totalSessions).toBe(0)
+
+      expect(result.removed).toContain(config.configDir)
     })
 
     it('should handle case where no data exists', async () => {
@@ -769,7 +981,8 @@ export EDITOR=vim`
       // Create a corrupted backup file referencing a non-existent profile
       const { getConfig } = await import('./config')
       const config = getConfig()
-      const backupFile = path.join(config.configDir, 'backup.env')
+      const sessionId = `${process.ppid || 1}-${process.env.SHLVL || '1'}-${process.pid}`
+      const backupFile = path.join(config.configDir, `backup-${sessionId}.env`)
       await fs.ensureDir(config.configDir)
       await fs.writeFile(backupFile, '# envctl-profile:nonexistent-profile\nTEST_VAR=some-value\n')
 

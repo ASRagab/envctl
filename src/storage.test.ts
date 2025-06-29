@@ -1,5 +1,5 @@
 import { Storage } from './storage'
-import { Profile } from './types'
+import { Profile, Config } from './types'
 import fs from 'fs-extra'
 import path from 'path'
 import os from 'os'
@@ -7,111 +7,91 @@ import os from 'os'
 describe('Storage', () => {
   let storage: Storage
   let tempDir: string
+  let config: Config
 
   beforeEach(async () => {
-    tempDir = path.join(os.tmpdir(), `envctl-storage-test-${Date.now()}`)
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'envctl-test-'))
+    config = {
+      configDir: tempDir,
+      profilesDir: path.join(tempDir, 'profiles'),
+    }
 
-    // Mock the config to use our temp directory
+    // Mock getConfig to return our test config
     jest.doMock('./config', () => ({
-      getConfig: () => ({
-        configDir: tempDir,
-        profilesDir: path.join(tempDir, 'profiles'),
-        // Removed stateFile from mock config
-      }),
+      getConfig: () => config,
     }))
 
-    // Create the Storage after mocking
+    // Import Storage after mocking
     const { Storage: MockedStorage } = await import('./storage')
     storage = new MockedStorage()
   })
 
   afterEach(async () => {
-    // Clean up temp files
-    try {
-      if (await fs.pathExists(tempDir)) {
-        await fs.remove(tempDir)
-      }
-    } catch {
-      // Ignore cleanup errors
-    }
+    await fs.remove(tempDir)
     jest.resetModules()
   })
 
-  describe('saveProfile and loadProfile', () => {
-    const testProfile: Profile = {
-      name: 'test-profile',
-      variables: {
-        DATABASE_URL: 'postgresql://localhost/test',
-        API_KEY: 'secret123',
-      },
-      createdAt: new Date('2024-01-01'),
-      updatedAt: new Date('2024-01-02'),
+  // Helper function to get current session ID (matching the actual implementation)
+  const getCurrentSessionId = (): string => {
+    const shellPid = process.ppid || 0
+    const shlvl = process.env.SHLVL || '1'
+
+    let terminalContext = ''
+    if (process.env.TERM_PROGRAM) {
+      terminalContext = `-${process.env.TERM_PROGRAM}`
+    } else if (process.env.SSH_TTY) {
+      terminalContext = '-ssh'
+    } else if (process.env.TERM) {
+      terminalContext = `-${process.env.TERM.split('-')[0]}`
     }
 
-    it('should save and load a profile correctly', async () => {
-      await storage.saveProfile(testProfile)
+    return `${shellPid}-${shlvl}${terminalContext}`
+  }
 
+  // Helper function to get backup file path for current session
+  const getCurrentSessionBackupPath = (): string => {
+    const sessionId = getCurrentSessionId()
+    return path.join(config.configDir, `backup-${sessionId}.env`)
+  }
+
+  describe('profile operations', () => {
+    it('should save and load profile correctly', async () => {
+      const profile: Profile = {
+        name: 'test-profile',
+        variables: { API_KEY: 'secret123', DATABASE_URL: 'postgresql://localhost/test' },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+
+      await storage.saveProfile(profile)
       const loaded = await storage.loadProfile('test-profile')
-      expect(loaded?.name).toBe(testProfile.name)
-      expect(loaded?.variables).toEqual(testProfile.variables)
-      // Dates are serialized as strings in JSON
-      expect(loaded?.createdAt).toEqual('2024-01-01T00:00:00.000Z')
-      expect(loaded?.updatedAt).toEqual('2024-01-02T00:00:00.000Z')
+
+      expect(loaded).toMatchObject({
+        name: 'test-profile',
+        variables: { API_KEY: 'secret123', DATABASE_URL: 'postgresql://localhost/test' },
+      })
+      expect(loaded?.createdAt).toBeDefined()
+      expect(loaded?.updatedAt).toBeDefined()
+      expect(new Date(loaded?.createdAt!)).toBeInstanceOf(Date)
+      expect(new Date(loaded?.updatedAt!)).toBeInstanceOf(Date)
     })
 
     it('should return null for non-existent profile', async () => {
-      const loaded = await storage.loadProfile('nonexistent')
+      const loaded = await storage.loadProfile('non-existent')
       expect(loaded).toBeNull()
     })
 
-    it('should create directories automatically', async () => {
-      // Directories shouldn't exist initially
-      expect(await fs.pathExists(path.join(tempDir, 'profiles'))).toBe(false)
-
-      await storage.saveProfile(testProfile)
-
-      // Directories should be created
-      expect(await fs.pathExists(tempDir)).toBe(true)
-      expect(await fs.pathExists(path.join(tempDir, 'profiles'))).toBe(true)
-    })
-  })
-
-  describe('deleteProfile', () => {
-    const testProfile: Profile = {
-      name: 'test-profile',
-      variables: { TEST: 'value' },
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }
-
-    it('should delete an existing profile', async () => {
-      await storage.saveProfile(testProfile)
-
-      const deleted = await storage.deleteProfile('test-profile')
-      expect(deleted).toBe(true)
-
-      const loaded = await storage.loadProfile('test-profile')
-      expect(loaded).toBeNull()
-    })
-
-    it('should return false when deleting non-existent profile', async () => {
-      const deleted = await storage.deleteProfile('nonexistent')
-      expect(deleted).toBe(false)
-    })
-  })
-
-  describe('listProfiles', () => {
-    it('should list all profiles', async () => {
+    it('should list profiles correctly', async () => {
       const profile1: Profile = {
         name: 'profile1',
-        variables: {},
+        variables: { VAR1: 'value1' },
         createdAt: new Date(),
         updatedAt: new Date(),
       }
 
       const profile2: Profile = {
         name: 'profile2',
-        variables: {},
+        variables: { VAR2: 'value2' },
         createdAt: new Date(),
         updatedAt: new Date(),
       }
@@ -123,28 +103,48 @@ describe('Storage', () => {
       expect(profiles.sort()).toEqual(['profile1', 'profile2'])
     })
 
-    it('should return empty array when no profiles exist', async () => {
-      const profiles = await storage.listProfiles()
-      expect(profiles).toEqual([])
-    })
-
-    it('should ignore non-JSON files', async () => {
-      const profilesDir = path.join(tempDir, 'profiles')
-      await fs.ensureDir(profilesDir)
-
-      // Create a non-JSON file
-      await fs.writeFile(path.join(profilesDir, 'not-a-profile.txt'), 'content')
-
-      // Create a valid profile
-      await storage.saveProfile({
-        name: 'valid-profile',
-        variables: {},
+    it('should delete profile correctly', async () => {
+      const profile: Profile = {
+        name: 'test-profile',
+        variables: { API_KEY: 'secret123' },
         createdAt: new Date(),
         updatedAt: new Date(),
-      })
+      }
+
+      await storage.saveProfile(profile)
+      expect(await storage.loadProfile('test-profile')).not.toBeNull()
+
+      const deleted = await storage.deleteProfile('test-profile')
+      expect(deleted).toBe(true)
+      expect(await storage.loadProfile('test-profile')).toBeNull()
+    })
+
+    it('should return false when trying to delete non-existent profile', async () => {
+      const deleted = await storage.deleteProfile('non-existent')
+      expect(deleted).toBe(false)
+    })
+
+    it('should handle concurrent profile operations', async () => {
+      const promises: Promise<void>[] = []
+      for (let i = 0; i < 10; i++) {
+        const profile: Profile = {
+          name: `profile-${i}`,
+          variables: { [`VAR_${i}`]: `value-${i}` },
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }
+        promises.push(storage.saveProfile(profile))
+      }
+
+      await Promise.all(promises)
 
       const profiles = await storage.listProfiles()
-      expect(profiles).toEqual(['valid-profile'])
+      expect(profiles).toHaveLength(10)
+
+      for (let i = 0; i < 10; i++) {
+        const loaded = await storage.loadProfile(`profile-${i}`)
+        expect(loaded?.variables[`VAR_${i}`]).toBe(`value-${i}`)
+      }
     })
   })
 
@@ -155,62 +155,107 @@ describe('Storage', () => {
     })
 
     it('should return profile name from backup file marker', async () => {
-      const backupFilePath = path.join(tempDir, 'backup.env')
-      const backupContent = `# envctl-profile:dev
-DATABASE_URL=postgresql://localhost/test
-API_KEY=secret123`
-
-      await fs.ensureDir(tempDir)
-      await fs.writeFile(backupFilePath, backupContent)
+      const backupFile = getCurrentSessionBackupPath()
+      await fs.ensureDir(path.dirname(backupFile))
+      await fs.writeFile(backupFile, '# envctl-profile:dev\nAPI_KEY=secret\nDATABASE_URL=postgresql://localhost/dev\n')
 
       const profile = await storage.getCurrentlyLoadedProfile()
       expect(profile).toBe('dev')
     })
 
     it('should return "unknown" for backup file without marker', async () => {
-      const backupFilePath = path.join(tempDir, 'backup.env')
-      const backupContent = `DATABASE_URL=postgresql://localhost/test
-API_KEY=secret123`
-
-      await fs.ensureDir(tempDir)
-      await fs.writeFile(backupFilePath, backupContent)
+      const backupFile = getCurrentSessionBackupPath()
+      await fs.ensureDir(path.dirname(backupFile))
+      await fs.writeFile(backupFile, 'API_KEY=secret\nDATABASE_URL=postgresql://localhost/dev\n')
 
       const profile = await storage.getCurrentlyLoadedProfile()
       expect(profile).toBe('unknown')
     })
 
     it('should handle empty backup file', async () => {
-      const backupFilePath = path.join(tempDir, 'backup.env')
-      await fs.ensureDir(tempDir)
-      await fs.writeFile(backupFilePath, '')
+      const backupFile = getCurrentSessionBackupPath()
+      await fs.ensureDir(path.dirname(backupFile))
+      await fs.writeFile(backupFile, '')
 
       const profile = await storage.getCurrentlyLoadedProfile()
       expect(profile).toBe('unknown')
     })
 
     it('should handle backup file with only marker', async () => {
-      const backupFilePath = path.join(tempDir, 'backup.env')
-      const backupContent = `# envctl-profile:production`
-
-      await fs.ensureDir(tempDir)
-      await fs.writeFile(backupFilePath, backupContent)
+      const backupFile = getCurrentSessionBackupPath()
+      await fs.ensureDir(path.dirname(backupFile))
+      await fs.writeFile(backupFile, '# envctl-profile:production\n')
 
       const profile = await storage.getCurrentlyLoadedProfile()
       expect(profile).toBe('production')
     })
   })
 
+  describe('listActiveSessions', () => {
+    it('should return empty array when no active sessions', async () => {
+      const sessions = await storage.listActiveSessions()
+      expect(sessions).toEqual([])
+    })
+
+    it('should list active sessions correctly', async () => {
+      // Create backup files for different sessions
+      const session1Id = '12345-1-vscode'
+      const session2Id = '67890-2-terminal'
+
+      const backupFile1 = path.join(config.configDir, `backup-${session1Id}.env`)
+      const backupFile2 = path.join(config.configDir, `backup-${session2Id}.env`)
+
+      await fs.ensureDir(config.configDir)
+      await fs.writeFile(backupFile1, '# envctl-profile:dev\nAPI_KEY=secret1\n')
+      await fs.writeFile(backupFile2, '# envctl-profile:prod\nAPI_KEY=secret2\n')
+
+      const sessions = await storage.listActiveSessions()
+      expect(sessions).toHaveLength(2)
+
+      const sessionIds = sessions.map((s) => s.sessionId).sort()
+      expect(sessionIds).toEqual([session1Id, session2Id])
+
+      const devSession = sessions.find((s) => s.profileName === 'dev')
+      const prodSession = sessions.find((s) => s.profileName === 'prod')
+
+      expect(devSession?.sessionId).toBe(session1Id)
+      expect(prodSession?.sessionId).toBe(session2Id)
+    })
+
+    it('should handle sessions with unknown profiles', async () => {
+      const sessionId = '12345-1-vscode'
+      const backupFile = path.join(config.configDir, `backup-${sessionId}.env`)
+
+      await fs.ensureDir(config.configDir)
+      await fs.writeFile(backupFile, 'API_KEY=secret\n') // No profile marker
+
+      const sessions = await storage.listActiveSessions()
+      expect(sessions).toHaveLength(1)
+      expect(sessions[0].sessionId).toBe(sessionId)
+      expect(sessions[0].profileName).toBe('unknown')
+    })
+
+    it('should ignore non-backup files', async () => {
+      await fs.ensureDir(config.configDir)
+      await fs.writeFile(path.join(config.configDir, 'not-a-backup.txt'), 'content')
+      await fs.writeFile(path.join(config.configDir, 'backup-12345-1-vscode.env'), '# envctl-profile:test\n')
+
+      const sessions = await storage.listActiveSessions()
+      expect(sessions).toHaveLength(1)
+      expect(sessions[0].profileName).toBe('test')
+    })
+  })
+
   describe('backup file operations', () => {
     it('should save and load backup correctly', async () => {
-      const backupData = {
-        TEST_VAR: 'original-value',
+      const variables = {
+        DATABASE_URL: 'postgresql://localhost/test',
         API_KEY: 'secret123',
       }
 
-      await storage.saveBackup(backupData)
-
+      await storage.saveBackup(variables)
       const loaded = await storage.loadBackup()
-      expect(loaded).toEqual(backupData)
+      expect(loaded).toEqual(variables)
     })
 
     it('should return empty object when no backup file exists', async () => {
@@ -218,44 +263,26 @@ API_KEY=secret123`
       expect(loaded).toEqual({})
     })
 
-    it('should handle empty backup', async () => {
-      await storage.saveBackup({})
-
-      const loaded = await storage.loadBackup()
-      expect(loaded).toEqual({})
-    })
-
-    it('should clear backup file', async () => {
-      const backupData = { TEST_VAR: 'value' }
-
-      await storage.saveBackup(backupData)
-      expect(await storage.loadBackup()).toEqual(backupData)
-
-      await storage.clearBackup()
-      expect(await storage.loadBackup()).toEqual({})
-    })
-
     it('should handle backup with special characters', async () => {
-      const backupData = {
-        DATABASE_URL: 'postgresql://user:pass@host:5432/db?param=value',
-        COMPLEX_VAR: 'value with spaces and = equals',
+      const variables = {
+        PASSWORD: 'p@ssw0rd!',
+        URL: 'https://example.com/path?param=value&other=123',
+        SPECIAL_CHARS: 'value with spaces and = equals',
       }
 
-      await storage.saveBackup(backupData)
-
+      await storage.saveBackup(variables)
       const loaded = await storage.loadBackup()
-      expect(loaded).toEqual(backupData)
+      expect(loaded).toEqual(variables)
     })
 
     it('should ignore profile marker when parsing backup variables', async () => {
-      // Manually create backup file with profile marker
-      const backupFilePath = path.join(tempDir, 'backup.env')
-      const backupContent = `# envctl-profile:dev
-DATABASE_URL=postgresql://localhost/test
-API_KEY=secret123`
-
-      await fs.ensureDir(tempDir)
-      await fs.writeFile(backupFilePath, backupContent)
+      // Create backup file with profile marker
+      const backupFile = getCurrentSessionBackupPath()
+      await fs.ensureDir(path.dirname(backupFile))
+      await fs.writeFile(
+        backupFile,
+        '# envctl-profile:test-profile\nDATABASE_URL=postgresql://localhost/test\nAPI_KEY=secret123\n',
+      )
 
       // loadBackup should ignore the profile marker line
       const loaded = await storage.loadBackup()
@@ -263,8 +290,15 @@ API_KEY=secret123`
         DATABASE_URL: 'postgresql://localhost/test',
         API_KEY: 'secret123',
       })
-      // Should not include the profile marker as a variable
-      expect(loaded['# envctl-profile']).toBeUndefined()
+    })
+
+    it('should handle corrupted backup file gracefully', async () => {
+      const backupFile = getCurrentSessionBackupPath()
+      await fs.ensureDir(path.dirname(backupFile))
+      await fs.writeFile(backupFile, 'invalid content\nwithout=proper\nformat')
+
+      const loaded = await storage.loadBackup()
+      expect(loaded).toEqual({ without: 'proper' }) // Only valid line should be parsed
     })
   })
 

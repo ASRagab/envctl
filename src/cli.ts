@@ -14,7 +14,7 @@ const error = (message: string) => console.log(chalk.red(`✗ ${message}`))
 const info = (message: string) => console.log(chalk.blue(`ℹ ${message}`))
 const warn = (message: string) => console.log(chalk.yellow(`⚠ ${message}`))
 
-program.name('envctl').description('Environment variable context manager').version('1.0.0')
+program.name('envctl').description('Environment variable context manager').version('x.x.x')
 
 program
   .command('create')
@@ -154,10 +154,31 @@ program
   .action(async () => {
     try {
       const status = await envManager.getStatus()
-      if (status.currentProfile) {
-        info(`Currently loaded: ${chalk.cyan(status.currentProfile)} (${status.variableCount} variables)`)
+
+      // Current session status
+      if (status.currentSession.profileName) {
+        info(
+          `Current session: ${chalk.cyan(status.currentSession.profileName)} (${status.currentSession.variableCount} variables)`,
+        )
       } else {
-        info('No profile currently loaded')
+        info('Current session: No profile loaded')
+      }
+
+      // Other sessions status
+      if (status.otherSessions.length > 0) {
+        console.log()
+        info('Other active sessions:')
+        status.otherSessions.forEach((session) => {
+          const profileDisplay = session.profileName ? chalk.cyan(session.profileName) : chalk.gray('no profile')
+          const sessionDisplay = chalk.yellow(session.sessionId)
+          console.log(`  Session ${sessionDisplay}: ${profileDisplay}`)
+        })
+      }
+
+      // Summary
+      if (status.totalSessions > 1) {
+        console.log()
+        info(`Total active sessions: ${status.totalSessions}`)
       }
     } catch (err) {
       error((err as Error).message)
@@ -169,7 +190,8 @@ program
   .command('list')
   .description('List profiles or variables in profile')
   .argument('[profile]', 'Profile name (optional)')
-  .action(async (profile?: string) => {
+  .option('-s, --sessions', 'Show session information for loaded profiles')
+  .action(async (profile?: string, options?: { sessions?: boolean }) => {
     try {
       if (profile) {
         const profileData = await envManager.getProfile(profile)
@@ -193,7 +215,15 @@ program
         } else {
           console.log(chalk.cyan('Available profiles:'))
           for (const p of profiles) {
-            const status = p.isLoaded ? chalk.green(' (loaded)') : ''
+            let status = ''
+            if (p.isLoaded) {
+              if (options?.sessions && p.loadedInSessions) {
+                const sessionList = p.loadedInSessions.map((s) => chalk.yellow(s)).join(', ')
+                status = chalk.green(` (loaded in sessions: ${sessionList})`)
+              } else {
+                status = chalk.green(' (loaded)')
+              }
+            }
             console.log(`  ${chalk.yellow(p.name)} (${p.variableCount} variables)${status}`)
           }
         }
@@ -341,6 +371,82 @@ program
       process.exit(1)
     }
   })
+
+// Debug command to show session info - temporarily disabled
+/*
+program
+  .command('debug-session')
+  .description('Debug session ID generation (for troubleshooting)')
+  .action(async () => {
+    try {
+      const { Storage } = await import('./storage')
+      
+      const storage = new Storage()
+      
+      console.log('=== Debug: Session Information ===')
+      console.log(`Node.js PID: ${process.pid}`)
+      console.log(`Node.js PPID: ${process.ppid}`)
+      console.log(`SHLVL: ${process.env.SHLVL}`)
+      console.log(`TERM: ${process.env.TERM}`)
+      console.log(`TERM_PROGRAM: ${process.env.TERM_PROGRAM}`)
+      console.log(`SSH_TTY: ${process.env.SSH_TTY}`)
+      
+      const sessionId = storage['getSessionId']()
+      console.log(`Generated Session ID: ${sessionId}`)
+      
+      const backupPath = storage['sessionBackupFilePath']
+      console.log(`Expected backup file: ${backupPath}`)
+      
+      // Check if backup file exists
+      const fs = require('fs-extra')
+      const configDir = storage['config'].configDir
+      const files = await fs.readdir(configDir).catch(() => [])
+      const backupFiles = files.filter((f: string) => f.startsWith('backup-') && f.endsWith('.env'))
+      console.log(`Actual backup files: ${backupFiles.join(', ') || 'none'}`)
+      
+      // Debug getCurrentlyLoadedProfile
+      console.log('\n=== Debug: getCurrentlyLoadedProfile ===')
+      const fileExists = await fs.pathExists(backupPath)
+      console.log(`Backup file exists: ${fileExists}`)
+      
+      if (fileExists) {
+        const content = await fs.readFile(backupPath, 'utf-8')
+        console.log(`Backup file content: ${JSON.stringify(content)}`)
+        const lines = content.split('\n')
+        console.log(`First line: ${JSON.stringify(lines[0])}`)
+        const firstLine = lines[0]?.trim()
+        console.log(`First line trimmed: ${JSON.stringify(firstLine)}`)
+        console.log(`Starts with profile marker: ${firstLine?.startsWith('# envctl-profile:')}`)
+        if (firstLine?.startsWith('# envctl-profile:')) {
+          const profileName = firstLine.replace('# envctl-profile:', '').trim()
+          console.log(`Extracted profile name: ${JSON.stringify(profileName)}`)
+        }
+      }
+      
+      const currentProfile = await storage.getCurrentlyLoadedProfile()
+      console.log(`getCurrentlyLoadedProfile result: ${JSON.stringify(currentProfile)}`)
+      
+      // Debug isSessionActive
+      console.log('\n=== Debug: isSessionActive ===')
+      console.log(`Testing if session ${sessionId} is active...`)
+      const isActive = storage['isSessionActive'](sessionId)
+      console.log(`isSessionActive result: ${isActive}`)
+      
+      // Test PID 1 specifically
+      console.log(`Testing if PID 1 is active...`)
+      try {
+        process.kill(1, 0)
+        console.log(`PID 1 signal test: SUCCESS (process exists)`)
+      } catch (error) {
+        console.log(`PID 1 signal test: FAILED (${error})`)
+      }
+      
+    } catch (error) {
+      console.error('Error:', error instanceof Error ? error.message : error)
+      process.exit(1)
+    }
+  })
+*/
 
 program.parse()
 
